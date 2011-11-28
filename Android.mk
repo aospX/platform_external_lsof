@@ -28,7 +28,7 @@ LOCAL_MODULE := liblsof
 LOCAL_MODULE_TAGS:= debug
 
 LOCAL_C_INCLUDES := \
-	external/clearsilver/util/regex
+	external/busybox/android/regex
 
 LOCAL_CFLAGS := -Os -g -W -Wall \
         -DLINUXV=26032 \
@@ -52,7 +52,7 @@ LOCAL_SRC_FILES := \
 	util.c
 
 LOCAL_C_INCLUDES := \
-	external/clearsilver/util/regex
+	external/busybox/android/regex
 
 LOCAL_CFLAGS := -Os -g -W -Wall \
 	-DLINUXV=26032 \
@@ -81,7 +81,7 @@ LOCAL_SRC_FILES := \
 	util.c
 
 LOCAL_C_INCLUDES := \
-	external/clearsilver/util/regex
+	external/busybox/android/regex
 
 LOCAL_CFLAGS := -Os -g -W -Wall \
 	-DLINUXV=26032 \
