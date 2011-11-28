@@ -25,7 +25,7 @@ LOCAL_SRC_FILES := \
 	lib/snpf.c
 
 LOCAL_MODULE := liblsof
-LOCAL_MODULE_TAGS:= eng
+LOCAL_MODULE_TAGS:= debug
 
 LOCAL_C_INCLUDES := \
 	external/clearsilver/util/regex
@@ -63,7 +63,7 @@ LOCAL_CFLAGS := -Os -g -W -Wall \
 	-DLSOF_VSTR=\"2.6.32-androidlol\"
 
 LOCAL_MODULE := lsof
-LOCAL_MODULE_TAGS := eng
+LOCAL_MODULE_TAGS := debug
 
 LOCAL_STATIC_LIBRARIES := \
 	liblsof \
@@ -92,7 +92,7 @@ LOCAL_CFLAGS := -Os -g -W -Wall \
 	-DLSOF_VSTR=\"2.6.32-androidlol\"
 
 LOCAL_MODULE := utility_lsof
-LOCAL_MODULE_TAGS := eng
+LOCAL_MODULE_TAGS := debug
 LOCAL_MODULE_CLASS := UTILITY_EXECUTABLES
 LOCAL_MODULE_PATH := $(PRODUCT_OUT)/utilities
 LOCAL_UNSTRIPPED_PATH := $(PRODUCT_OUT)/symbols/utilities
