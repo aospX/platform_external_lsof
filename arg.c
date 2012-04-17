@@ -32,7 +32,7 @@
 #ifndef lint
 static char copyright[] =
 "@(#) Copyright 1994 Purdue Research Foundation.\nAll rights reserved.\n";
-static char *rcsid = "$Id: arg.c,v 1.49 2009/03/25 19:20:30 abe Exp $";
+static char *rcsid = "$Id: arg.c,v 1.51 2012/04/10 16:30:06 abe Exp $";
 #endif
 
 
@@ -312,7 +312,13 @@ ck_file_arg(i, ac, av, fv, rs, sbp)
 #endif	/* defined(CKFA_MPXCHAN) */
 
 		} else {
+
+#if	defined(SAVE_MP_IN_SFILE)
+		    sfp->mp = mp = mmp[mx++];
+#else	/* !defined(SAVE_MP_IN_SFILE) */
 		    mp = mmp[mx++];
+#endif	/* defined(SAVE_MP_IN_SFILE) */
+
 		    ss++;
 
 #if	defined(HASPROCFS)
@@ -720,6 +726,69 @@ enter_cmd_rx(x)
 	NCmdRxU++;
 	return(0);
 }
+
+
+#if	defined(HASEOPT)
+/*
+ * enter_efsys() -- enter path of file system whose kernel blocks are to be
+ *		    eliminated
+ */
+
+int
+enter_efsys(e, rdlnk)
+	char *e;			/* file system path */
+	int rdlnk;			/* avoid readlink(2) if non-zero */
+{
+	char *ec;			/* pointer to copy of path */
+	efsys_list_t *ep;		/* file system path list pointer */
+	int i;				/* temporary index */
+	char *path;			/* Readlink() of file system path */
+
+	if (!e || (*e != '/')) {
+	    if (!Fwarn)
+		(void) fprintf(stderr,
+		    "%s: -e not followed by a file system path: \"%s\"\n",
+		    Pn, e);
+	    return(1);
+	}
+	if (!(ec = mkstrcpy(e, (MALLOC_S *)NULL))) {
+	    (void) fprintf(stderr, "%s: no space for -e string: ", Pn);
+	    safestrprt(e, stderr, 1);
+	    Exit(1);
+	}
+	if (rdlnk)
+	    path = ec;
+	else {
+	    if (!(path = Readlink(ec)))
+		return(1);
+	}
+/*
+ * Remove terminating `/' characters from paths longer than one.
+ */
+	for (i = (int)strlen(path); (i > 1) && (path[i - 1] == '/'); i--) {
+	    path[i - 1] = '\0';
+	}
+/*
+ * Enter file system path on list, avoiding duplicates.
+ */
+	for (ep = Efsysl; ep; ep = ep->next) {
+	   if (!strcmp(ep->path, path))
+		return(0);
+	}
+	if (!(ep = (efsys_list_t *)malloc((MALLOC_S)(sizeof(efsys_list_t))))) {
+	   (void) fprintf(stderr, "%s: no space for \"-e %s\" entry\n",
+		Pn, e);
+	   Exit(1);
+	}
+	ep->path = path;
+	ep->pathl = i;
+	ep->rdlnk = rdlnk;
+	ep->mp = (struct mounts *)NULL;
+	ep->next = Efsysl;
+	Efsysl = ep;
+	return(0);
+}
+#endif	/* defined(HASEOPT) */
 
 
 /*

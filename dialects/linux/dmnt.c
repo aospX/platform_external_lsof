@@ -32,7 +32,7 @@
 #ifndef	lint
 static char copyright[] =
 "@(#) Copyright 1997 Purdue Research Foundation.\nAll rights reserved.\n";
-static char *rcsid = "$Id: dmnt.c,v 1.17 2008/04/15 13:32:26 abe Exp $";
+static char *rcsid = "$Id: dmnt.c,v 1.19 2012/04/10 16:39:50 abe Exp $";
 #endif
 
 
@@ -56,7 +56,7 @@ static char *rcsid = "$Id: dmnt.c,v 1.17 2008/04/15 13:32:26 abe Exp $";
 _PROTOTYPE(static char *cvtoe,(char *os));
 
 #if	defined(HASMNTSUP)
-_PROTOTYPE(static int getmntdev,(char *dn, struct stat *s, int *ss));
+_PROTOTYPE(static int getmntdev,(char *dn, size_t dnl, struct stat *s, int *ss));
 _PROTOTYPE(static int hash_mnt,(char *dn));
 #endif	/* defined(HASMNTSUP) */
 
@@ -67,7 +67,8 @@ _PROTOTYPE(static int hash_mnt,(char *dn));
 
 #if	defined(HASMNTSUP)
 typedef struct mntsup {
-	char *dn;			/* directory name */
+	char *dn;			/* mounted directory name */
+	size_t dnl;			/* strlen(dn) */
 	dev_t dev;			/* device number */
 	int ln;				/* line on which defined */
 	struct mntsup *next;		/* next entry */
@@ -180,8 +181,9 @@ cvtoe(os)
  */
 
 static int
-getmntdev(dn, s, ss)
-	char *dn;			/* mount point directory name */
+getmntdev(dn, dnl, s, ss)
+	char *dn;			/* mounted directory name */
+	size_t dnl;			/* strlen(dn) */
 	struct stat *s;			/* stat(2) buffer receptor */
 	int *ss;			/* stat(2) status result -- i.e., SB_*
 					 * values */
@@ -304,7 +306,7 @@ getmntdev(dn, s, ss)
 		}
 		h = hash_mnt(path);
 		for (mp = MSHash[h]; mp; mp = mp->next) {
-		    if (!strcmp(mp->dn, path))
+		    if ((mp->dnl == dnl) && !strcmp(mp->dn, path))
 			break;
 		}
 		if (mp) {
@@ -338,6 +340,7 @@ getmntdev(dn, s, ss)
 		    Exit(1);
 		}
 		(void) strcpy(mpn->dn, path);
+		mpn->dnl = sz;
 		mpn->dev = dev;
 		mpn->ln = ln;
 		mpn->next = MSHash[h];
@@ -368,13 +371,13 @@ getmntdev(dn, s, ss)
 	}
 /*
  * If no errors have been detected reading the mount supplement file, search
- * its hash biuckets for the supplied directory path.
+ * its hash buckets for the supplied directory path.
  */
 	if (err)
 	    return(0);
 	h = hash_mnt(dn);
 	for (mp = MSHash[h]; mp; mp = mp->next) {
-	    if (!strcmp(dn, mp->dn)) {
+	    if ((dnl == mp->dnl) && !strcmp(dn, mp->dn)) {
 		memset((void *)s, 0, sizeof(struct stat));
 		s->st_dev = mp->dev;
 		*ss |= SB_DEV;
@@ -417,9 +420,11 @@ readmnt()
 {
 	char buf[MAXPATHLEN], *cp, **fp;
 	char *dn = (char *)NULL;
-	int ds;
+	size_t dnl;
+	int ds, ne;
 	char *fp0 = (char *)NULL;
 	char *fp1 = (char *)NULL;
+	int fr, ignrdl, ignstat;
 	char *ln;
 	struct mounts *mp;
 	FILE *ms;
@@ -457,82 +462,169 @@ readmnt()
 	    if (!(fp0 = cvtoe(fp[0])) || !(fp1 = cvtoe(fp[1])))
 		continue;
 	/*
-	 * Ignore an entry with a colon in the device name, followed by
-	 * "(pid*" -- it's probably an automounter entry.
+	 * Locate any colon (':') in the device name.
+	 *
+	 * If the colon is followed by * "(pid*" -- it's probably an
+	 * automounter entry.
 	 *
 	 * Ignore autofs, pipefs, and sockfs entries.
 	 */
-	    if ((cp = strchr(fp0, ':')) && !strncasecmp(++cp, "(pid", 4))
+	    cp = strchr(fp0, ':');
+	    if (cp && !strncasecmp(++cp, "(pid", 4))
 		continue;
 	    if (!strcasecmp(fp[2], "autofs") || !strcasecmp(fp[2], "pipefs")
 	    ||  !strcasecmp(fp[2], "sockfs"))
 		continue;
 	/*
-	 * Interpolate a possible symbolic directory link.
+	 * Interpolate a possible symbolic mounted directory link.
 	 */
 	    if (dn)
 		(void) free((FREE_P *)dn);
 	    dn = fp1;
 	    fp1 = (char *)NULL;
-	    if (!(ln = Readlink(dn))) {
-		if (!Fwarn){
-		    (void) fprintf(stderr,
-			"      Output information may be incomplete.\n");
+
+#if	defined(HASEOPT)
+	if (Efsysl) {
+
+	/*
+	 * If there is an -e file system list, check it to decide if a stat()
+	 * and Readlink() on this one should be performed.
+	 */
+	    efsys_list_t *ep;
+
+	    for (ignrdl = ignstat = 0, ep = Efsysl; ep; ep = ep->next) {
+		if (!strcmp(dn, ep->path)) {
+		    ignrdl = ep->rdlnk;
+		    ignstat = 1;
+		    break;
 		}
-		continue;
 	    }
-	    if (ln != dn) {
-		(void) free((FREE_P *)dn);
-		dn = ln;
+	} else
+
+#endif	/* defined(HASEOPT */
+
+	    ignrdl = ignstat = 0;
+
+	/*
+	 * Avoid Readlink() when requested.
+	 */
+	    if (!ignrdl) {
+		if (!(ln = Readlink(dn))) {
+		    if (!Fwarn) {
+			(void) fprintf(stderr,
+			"      Output information may be incomplete.\n");
+		    }
+			continue;
+		}
+		if (ln != dn) {
+		    (void) free((FREE_P *)dn);
+		    dn = ln;
+		}
 	    }
 	    if (*dn != '/')
 		continue;
+	    dnl = strlen(dn);
 	/*
-	 * Detect an NFS mount point.
+	 * Test for duplicate and NFS directories.
 	 */
-	    if (!(nfs = strcasecmp(fp[2], "nfs")) && !HasNFS)
-		HasNFS = 1;
+	    for (mp = Lmi; mp; mp = mp->next) {
+		if ((dnl == mp->dirl) && !strcmp(dn, mp->dir))
+		    break;
+	    }
+	    if ((nfs = strcasecmp(fp[2], "nfs"))) {
+		if ((nfs = strcasecmp(fp[2], "nfs3")))
+		    nfs = strcasecmp(fp[2], "nfs4");
+	    }
+	    if (mp) {
+
+	    /*
+	     * If this duplicate directory is not root, ignore it.  If the
+	     * already remembered entry is NFS-mounted, ignore this one.  If
+	     * this one is NFS-mounted, ignore the already remembered entry.
+	     */
+		if (strcmp(dn, "/"))
+		    continue;
+		if (mp->ty == N_NFS)
+		    continue;
+		if (nfs)
+		    continue;
+	    }
 	/*
 	 * Stat() the directory.
 	 */
-	    if (statsafely(dn, &sb)) {
-		if (!Fwarn) {
-		    (void) fprintf(stderr, "%s: WARNING: can't stat() ", Pn);
-		    safestrprt(fp[2], stderr, 0);
-		    (void) fprintf(stderr, " file system ");
-		    safestrprt(dn, stderr, 1);
-		    (void) fprintf(stderr,
-			"      Output information may be incomplete.\n");
-		}
+	    if (ignstat)
+		fr = 1;
+	    else {
+		if ((fr = statsafely(dn, &sb))) {
+		    if (!Fwarn) {
+			(void) fprintf(stderr, "%s: WARNING: can't stat() ",
+			    Pn);
+			safestrprt(fp[2], stderr, 0);
+			(void) fprintf(stderr, " file system ");
+			safestrprt(dn, stderr, 1);
+			(void) fprintf(stderr,
+			    "      Output information may be incomplete.\n");
+		    }
+		} else
+		    ds = SB_ALL;
+	    }
 
 #if	defined(HASMNTSUP)
+	    if (fr) {
+
+	    /*
+	     * If the stat() failed or wasn't called, check the mount
+	     * supplement table, if possible.
+	     */
 		if ((MntSup == 2) && MntSupP) {
 		    ds = 0;
-		    if (!getmntdev(dn, &sb, &ds) || !(ds & SB_DEV))
+		    if (getmntdev(dn, dnl, &sb, &ds) || !(ds & SB_DEV)) {
+			(void) fprintf(stderr,
+			    "%s: assuming dev=%#lx for %s from %s\n",
+			    Pn, (long)sb.st_dev, dn, MntSupP);
+			}
+		} else {
+		    if (!ignstat)
 			continue;
-		    (void) fprintf(stderr,
-			"      assuming dev=%#lx from %s\n",
-			(long)sb.st_dev, MntSupP);
-		} else
-		    continue;
+		   ds = 0;		/* No stat() was allowed. */
+		}
+	    }
 #else	/* !defined(HASMNTSUP) */
-		continue;
+	    if (fr) {
+		if (!ignstat)
+		    continue;
+		ds = 0;			/* No stat() was allowed. */
+	    }
 #endif	/* defined(HASMNTSUP) */
 
-	    } else
-		ds = SB_ALL;
 	/*
-	 * Allocate and fill a local mount structure.
+	 * Fill a local mount structure or reuse a previous entry when
+	 * indicated.
 	 */
-	    if (!(mp = (struct mounts *)malloc(sizeof(struct mounts)))) {
-		(void) fprintf(stderr,
-		    "%s: can't allocate mounts struct for: ", Pn);
-		safestrprt(dn, stderr, 1);
-		Exit(1);
+	    if (mp) {
+		ne = 0;
+		if (mp->dir) {
+		    (void) free((FREE_P *)mp->dir);
+		    mp->dir = (char *)NULL;
+		}
+		if (mp->fsname) {
+		    (void) free((FREE_P *)mp->fsname);
+		    mp->fsname = (char *)NULL;
+		}
+	    } else {
+		ne = 1;
+		if (!(mp = (struct mounts *)malloc(sizeof(struct mounts)))) {
+		    (void) fprintf(stderr,
+			"%s: can't allocate mounts struct for: ", Pn);
+		    safestrprt(dn, stderr, 1);
+		    Exit(1);
+	        }
 	    }
 	    mp->dir = dn;
 	    dn = (char *)NULL;
-	    mp->next = Lmi;
+	    mp->dirl = dnl;
+	    if (ne)
+		mp->next = Lmi;
 	    mp->dev = ((mp->ds = ds) & SB_DEV) ? sb.st_dev : 0;
 	    mp->rdev = (ds & SB_RDEV) ? sb.st_rdev : 0;
 	    mp->inode = (INODETYPE)((ds & SB_INO) ? sb.st_ino : 0);
@@ -549,27 +641,47 @@ readmnt()
 	 * If support for the mount supplement file is defined and if the
 	 * +m option was supplied, print mount supplement information.
 	 */
-	    if (MntSup == 1)
-		(void) printf("%s %#lx\n", mp->dir, (long)mp->dev);
+	    if (MntSup == 1) {
+		if (mp->dev)
+		    (void) printf("%s %#lx\n", mp->dir, (long)mp->dev);
+		else
+		    (void) printf("%s 0x0\n", mp->dir);
+	    }
 #endif	/* defined(HASMNTSUP) */
 
 	/*
-	 * Interpolate a possible file system (mounted-on) device name link.
+	 * Save mounted-on device or directory name.
 	 */
 	    dn = fp0;
 	    fp0 = (char *)NULL;
 	    mp->fsname = dn;
-	    ln = Readlink(dn);
+	/*
+	 * Interpolate a possible file system (mounted-on) device name or
+	 * directory name link.
+	 *
+	 * Avoid Readlink() when requested.
+	 */
+	    if (ignrdl || (*dn != '/')) {
+		if (!(ln = mkstrcpy(dn, (MALLOC_S *)NULL))) {
+		    (void) fprintf(stderr,
+			"%s: can't allocate space for: ", Pn);
+		    safestrprt(dn, stderr, 1);
+		    Exit(1);
+		}
+		ignstat = 1;
+	    } else
+		ln = Readlink(dn);
 	    dn = (char *)NULL;
 	/*
 	 * Stat() the file system (mounted-on) name and add file system
 	 * information to the local mount table entry.
 	 */
-	    if (!ln || statsafely(ln, &sb))
+	    if (ignstat || !ln || statsafely(ln, &sb))
 		sb.st_mode = 0;
 	    mp->fsnmres = ln;
 	    mp->fs_mode = sb.st_mode;
-	    Lmi = mp;
+	    if (ne)
+		Lmi = mp;
 	}
 /*
  * Clean up and return the local mount info table address.

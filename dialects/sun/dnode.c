@@ -32,7 +32,7 @@
 #ifndef lint
 static char copyright[] =
 "@(#) Copyright 1994 Purdue Research Foundation.\nAll rights reserved.\n";
-static char *rcsid = "$Id: dnode.c,v 1.57 2010/07/29 16:05:15 abe Exp $";
+static char *rcsid = "$Id: dnode.c,v 1.59 2012/04/10 16:40:23 abe Exp $";
 #endif
 
 
@@ -87,7 +87,13 @@ typedef struct sotpi_info {
 
 static	int	Sockfs_ctfs = 0;	/* CTF initialization status for
 					 * sockfs */
+
+#  if	defined(_LP64)
 #define	SOCKFS_MOD_FORMAT "/kernel/fs/%s/sockfs"
+#  else	/* !defined(_LP64) */
+#define	SOCKFS_MOD_FORMAT "/kernel/fs/sockfs"
+# endif	/* defined(_LP64) */
+
 					/* sockfs module pathname template to
 					 * which the kernel's instruction type
 					 * set is added for CTF access */
@@ -199,7 +205,13 @@ typedef struct znode {
  */
 
 static	int ZFS_ctfs = 0;		/* CTF initialization status for ZFS */
+
+#  if	defined(_LP64)
 #define ZFS_MOD_FORMAT   "/kernel/fs/%s/zfs"
+#  else	/* !defined(_LP64) */
+#define ZFS_MOD_FORMAT   "/kernel/fs/zfs"
+# endif	/* defined(_LP64) */
+
 					/* ZFS module pathname template to
 					 * which the kernel's instruction type
 					 * set is added for CTF access */
@@ -345,7 +357,11 @@ static build_v_optab_t Build_v_optab[] = {
 	{ "ctfssym",	 NULL,		N_CTFSSYM	},
 	{ "ctfstdir",	 NULL,		N_CTFSTDIR	},
 	{ "ctfstmpl",	 NULL,		N_CTFSTMPL	},
+
+#if	defined(HASCACHEFS)
 	{ "cvops",	 NULL,		N_CACHE		},
+#endif	/* defined(HASCACHEFS) */
+
 	{ "devops",	 "devfs",	N_DEV		},
 	{ "doorops",	 NULL,		N_DOOR		},
 	{ "fdops",	 "fd",		N_FD		},
@@ -475,7 +491,11 @@ _PROTOTYPE(static int is_socket,(struct vnode *v));
 _PROTOTYPE(static int read_cni,(struct snode *s, struct vnode *rv,
 	struct vnode *v, struct snode *rs, struct dev_info *di, char *din,
 	int dinl));
+
+#if	defined(HASCACHEFS)
 _PROTOTYPE(static int read_ncn,(KA_T na, KA_T ca, struct cnode *cn));
+#endif	/* defined(HASCACHEFS) */
+
 _PROTOTYPE(static int read_nln,(KA_T na, KA_T la, struct lnode *ln));
 _PROTOTYPE(static int read_nnn,(KA_T na, KA_T nna, struct namenode *n));
 
@@ -777,16 +797,29 @@ CTF_init(i, t, r)
 {
     int err;				/* error status */
     ctf_file_t *f;			/* CTF file info handle */
+
+# if	defined(_LP64)
     static char isa[256+1];		/* kernel instruction set name */
     static int isas = 0;		/* isa[] status */
-    char zfsmod[MAXPATHLEN];    	/* ZFS module pathname */
+# endif	/* defined(_LP64) */
+
+    char kernmod[MAXPATHLEN];    	/* kernel module pathname */
+    char *kmp;				/* kernel module path name pointer */
+    static char pfn[256+1];		/* system platform name */
+    static int pfns = 0;		/* pfn[] status: -1 = request failed
+					 *		  0 = none requested
+					 *		 >0 = available */
+    char pfxkernmod[MAXPATHLEN];	/* prefixed kernel module name */
+    struct stat sb;			/* stat(2) buffer */
 
     if (*i)
 	return;
+
+# if	defined(_LP64)
 /*
- * If CTF access hasn't been initialized, determine the name of the
- * kernel's instruction set, construct the pathname of the ZFS module,
- * open the module file and read its CTF info.
+ * If CTF access hasn't been initialized and a 64 bit kernel is in use,
+ * determine the name of the kernel's instruction set, and construct the
+ * pathname of the kernel module, using the supplied template.
  */
     if (!isas) {
 	if (sysinfo(SI_ARCHITECTURE_K, isa, sizeof(isa) - 1) == -1) {
@@ -796,15 +829,53 @@ CTF_init(i, t, r)
 	isas = 1;
 	isa[sizeof(isa) - 1] = '\0';
     }
-    (void) snprintf(zfsmod, sizeof(zfsmod) - 1, t, isa);
-    zfsmod[sizeof(zfsmod) - 1] = '\0';
-    if ((f = ctf_open(zfsmod, &err)) == NULL) {
+    (void) snprintf(kernmod, sizeof(kernmod) - 1, t, isa);
+    kernmod[sizeof(kernmod) - 1] = '\0';
+# else	/* !defined(_LP64) */
+/*
+ * If CTF access hasn't been initialized and a 32 bit kernel is in use, the
+ * supplied template is the module path name.
+ */
+    (void) strncpy(kernmod, t, sizeof(kernmod) - 1);
+# endif	/* defined(_LP64) */
+
+    kernmod[sizeof(kernmod) - 1] = '\0';
+    kmp = kernmod;
+    if (statsafely(kmp, &sb)) {
+
+    /*
+     * The module at the specified path does not exist or is inaccessible.
+     *
+     * Get the platform name and construct a prefix from it for module path
+     * name and see if that exists and is accessible.
+     *
+     * If it is, let CTF_init() use it; otherwise let CTF_init() fail on
+     * the specified path.
+     */
+	if (pfns >= 0) {
+	    if (!pfns)
+		pfns = sysinfo(SI_MACHINE, pfn, sizeof(pfn) - 1);
+	    if (pfns > 0) {
+		pfn[sizeof(pfn) - 1] = '\0';
+		(void) snprintf(pfxkernmod, sizeof(pfxkernmod) - 1,
+		    "/platform/%s/%s", pfn,
+		    (kernmod[0] == '/') ? &kernmod[1] : kernmod);
+		pfxkernmod[sizeof(pfxkernmod) - 1] = '\0';
+		if (!stat(pfxkernmod, &sb))
+		    kmp = pfxkernmod;
+	    }
+	}
+    }
+/*
+ * Open the module file and read its CTF info.
+ */
+    if ((f = ctf_open(kmp, &err)) == NULL) {
 	(void) fprintf(stderr, "%s: ctf_open: %s: %s\n",
-	    Pn, zfsmod, ctf_errmsg(err));
+	    Pn, kmp, ctf_errmsg(err));
 	Exit(1);
     }
     for (err = 0; r->name; r++) {
-	if (CTF_getmem(f, zfsmod, r->name, r->mem))
+	if (CTF_getmem(f, kmp, r->name, r->mem))
 	    err = 1;
     }
     (void) ctf_close(f);
@@ -1206,7 +1277,11 @@ void
 process_node(va)
 	KA_T va;			/* vnode kernel space address */
 {
+
+#if	defined(HASCACHEFS)
 	struct cnode cn;
+#endif	/* defined(HASCACHEFS) */
+
 	dev_t dev, rdev, trdev;
 	unsigned char devs = 0;
 	unsigned char fxs = 0;
@@ -1615,10 +1690,12 @@ vfs_read_error:
 	    break;
 #endif	/* solaris>=20500 */
 
+#if	defined(HASCACHEFS)
 	case N_CACHE:
 	    if (read_ncn(va, (KA_T)v->v_data, &cn))
 		return;
 	    break;
+#endif	/* defined(HASCACHEFS) */
 
 #if	solaris>=100000
 	case N_CTFSADIR:
@@ -1981,10 +2058,12 @@ vfs_read_error:
 		break;
 #endif	/* solaris>=20500 */
 
+#if	defined(HASCACHEFS)
 	    case N_CACHE:
 		if (read_ncn(va, (KA_T)v->v_data, &cn))
 		    return;
 		break;
+#endif	/* defined(HASCACHEFS) */
 
 #if	solaris>=100000
 	    case N_CTFSADIR:
@@ -2173,7 +2252,10 @@ vfs_read_error:
 	    break;
 #endif	/* solaris>=20500 */
 
+#if	defined(HASCACHEFS)
 	case N_CACHE:
+#endif	/* defined(HASCACHEFS) */
+
 	case N_HSFS:
 	case N_PCFS:
 	    if (kvs) {
@@ -2811,10 +2893,12 @@ vfs_read_error:
 	    break;
 #endif	/* solaris>=20500 */
 
+#if	defined(HASCACHEFS)
 	case N_CACHE:
 	    Lf->inode = (INODETYPE)cn.c_fileno;
 	    Lf->inp_ty = 1;
 	    break;
+#endif	/* defined(HASCACHEFS) */
 
 #if	solaris>=100000
 	case N_CTFSADIR:
@@ -3022,10 +3106,12 @@ vfs_read_error:
 		break;
 #endif	/* solaris>=20500 */
 
+#if	defined(HASCACHEFS)
 	    case N_CACHE:
 		Lf->sz = (SZOFFTYPE)cn.c_size;
 		Lf->sz_def = 1;
 		break;
+#endif	/* defined(HASCACHEFS) */
 
 #if	solaris>=100000
 	    case N_CTFSADIR:
@@ -3216,10 +3302,14 @@ vfs_read_error:
 #if	solaris>=20500
 	    case N_AUTO:
 		break;
+
+# if	defined(HASCACHEFS)
 	    case N_CACHE:
 		Lf->nlink = (long)cn.c_attr.va_nlink;
 		Lf->nlink_def = 1;
 		break;
+# endif	/* defined(HASCACHEFS) */
+
 #endif	/* solaris>=20500 */
 
 #if	solaris>=100000
@@ -4039,6 +4129,7 @@ read_nan(na, aa, rn)
 #endif	/* solaris>=20500 */
 
 
+#if	defined(HASCACHEFS)
 /*
  * read_ncn(na, ca, cn) - read node's cache node
  */
@@ -4062,6 +4153,7 @@ read_ncn(na, ca, cn)
 	}
 	return(0);
 }
+#endif	/* defined(HASCACHEFS) */
 
 
 #if	solaris>=100000

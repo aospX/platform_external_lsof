@@ -32,7 +32,7 @@
 #ifndef lint
 static char copyright[] =
 "@(#) Copyright 1997 Purdue Research Foundation.\nAll rights reserved.\n";
-static char *rcsid = "$Id: dnode.c,v 1.20 2009/03/25 19:22:39 abe Exp $";
+static char *rcsid = "$Id: dnode.c,v 1.22 2012/04/10 16:39:50 abe Exp $";
 #endif
 
 
@@ -193,7 +193,7 @@ get_fields(ln, sep, fr, eb, en)
 		if (!fp) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d bytes for field pointers.\n",
-			Pn, len);
+			Pn, (int)len);
 		    Exit(1);
 		}
 	    }
@@ -244,7 +244,7 @@ get_locks(p)
 	    if (!LckH) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d lock hash bytes\n",
-		    Pn, sizeof(struct llock *) * PIDBUCKS);
+		    Pn, (int)(sizeof(struct llock *) * PIDBUCKS));
 		Exit(1);
 	    }
 	}
@@ -389,15 +389,16 @@ process_proc_node(p, s, ss, l, ls)
 	    type = s->st_mode & S_IFMT;
 	    switch (type) {
 	    case S_IFBLK:
-		Ntype = N_BLK;
+		Lf->ntype = Ntype = N_BLK;
 		break;
 	    case S_IFCHR:
-		Ntype = N_CHR;
+		Lf->ntype = Ntype = N_CHR;
 		break;
 	    case S_IFIFO:
-		Ntype = N_FIFO;
+		Lf->ntype = Ntype = N_FIFO;
 		break;
 	    case S_IFSOCK:
+		/* Lf->ntype = Ntype = N_REGLR;		by alloc_lfile() */
 		process_proc_sock(p, s, ss, l, ls);
 		return;
 	    }
@@ -420,9 +421,11 @@ process_proc_node(p, s, ss, l, ls)
 	if (Ntype == N_REGLR && (HasNFS == 2)) {
 	    for (mp = readmnt(); mp; mp = mp->next) {
 		if ((mp->ty == N_NFS)
-		&&  (mp->ds & SB_DEV) && (Lf->dev == mp->dev)
+		&&  (mp->ds & SB_DEV) && Lf->dev_def && (Lf->dev == mp->dev)
+		&&  (mp->dir && mp->dirl
+		&&   !strncmp(mp->dir, p, mp->dirl))
 		) {
-		    Ntype = N_NFS;
+		    Lf->ntype = Ntype = N_NFS;
 		    break;
 		}
 	    }
@@ -508,7 +511,6 @@ process_proc_node(p, s, ss, l, ls)
 	    tn = "unknown";
 	if (tn)
 	    (void) snpf(Lf->type, sizeof(Lf->type), "%s", tn);
-	Lf->ntype = Ntype;
 /*
  * Record an NFS file selection.
  */
@@ -518,7 +520,7 @@ process_proc_node(p, s, ss, l, ls)
  * Test for specified file.
  */
 	if (Sfile
-	&& is_file_named((char *)NULL,
+	&& is_file_named(1, p, mp,
 			 ((type == S_IFCHR) || (type == S_IFBLK)) ? 1 : 0))
 	    Lf->sf |= SELNM;
 /*

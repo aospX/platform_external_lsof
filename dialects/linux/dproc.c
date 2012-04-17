@@ -32,7 +32,7 @@
 #ifndef lint
 static char copyright[] =
 "@(#) Copyright 1997 Purdue Research Foundation.\nAll rights reserved.\n";
-static char *rcsid = "$Id: dproc.c,v 1.23 2010/07/29 16:04:52 abe Exp $";
+static char *rcsid = "$Id: dproc.c,v 1.26 2012/04/10 16:39:50 abe Exp $";
 #endif
 
 #include "lsof.h"
@@ -82,6 +82,8 @@ static short Ckscko;			/* socket file only checking status:
 
 _PROTOTYPE(static int get_fdinfo,(char *p, struct l_fdinfo *fi));
 _PROTOTYPE(static int getlinksrc,(char *ln, char *src, int srcl));
+_PROTOTYPE(static int isefsys,(char *path, char *type, int l,
+			       efsys_list_t **rep, struct lfile **lfr));
 _PROTOTYPE(static int nm2id,(char *nm, int *id, int *idl));
 _PROTOTYPE(static int read_id_stat,(int ty, char *p, int id, char **cmd,
 				    int *ppid, int *pgid));
@@ -182,7 +184,7 @@ gather_proc_info()
 	    if (!(pidpath = (char *)malloc(pidpathl))) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d bytes for \"%s/\"<pid>\n",
-		    Pn, pidpathl, PROCFS);
+		    Pn, (int)pidpathl, PROCFS);
 		Exit(1);
 	    }
 	    (void) snpf(pidpath, pidpathl, "%s/", PROCFS);
@@ -262,7 +264,7 @@ gather_proc_info()
 		{
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d bytes for \"%s/%s/\"\n",
-			Pn, pidpathl, PROCFS, dp->d_name);
+			Pn, (int)pidpathl, PROCFS, dp->d_name);
 		    Exit(1);
 		}
 	    }
@@ -568,7 +570,7 @@ make_proc_path(pp, pl, np, nl, sf)
 	    if (!cp) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d bytes for %s%s\n",
-		    Pn, rl, pp, sf);
+		    Pn, (int)rl, pp, sf);
 		Exit(1);
 	    }
 	    *nl = rl;
@@ -577,6 +579,82 @@ make_proc_path(pp, pl, np, nl, sf)
 	(void) snpf(*np, *nl, "%s", pp);
 	(void) snpf(*np + pl, *nl - pl, "%s", sf);
 	return(rl - 1);
+}
+
+
+/*
+ * isefsys() -- is path on a file system exempted with -e
+ *
+ * Note: alloc_lfile() must have been called in advance.
+ */
+
+static int
+isefsys(path, type, l, rep, lfr)
+	char *path;			/* path to file */
+	char *type;			/* unknown file type */
+	int l;				/* link request: 0 = report
+					 *               1 = link */
+	efsys_list_t **rep;		/* returned Efsysl pointer, if not
+					 * NULL */
+	struct lfile **lfr;		/* allocated struct lfile pointer */
+{
+	efsys_list_t *ep;
+	int ds, len;
+	struct mounts *mp;
+	char nmabuf[MAXPATHLEN + 1];
+
+	len = (int) strlen(path);
+	for (ep = Efsysl; ep; ep = ep->next) {
+
+	/*
+	 * Look for a matching exempt file system path at the beginning of
+	 * the file path.
+	 */
+	    if (ep->pathl > len)
+		continue;
+	    if (strncmp(ep->path, path, ep->pathl))
+		continue;
+	/*
+	 * If only reporting, return information as requested.
+	 */
+	    if (!l) {
+		if (rep)
+		    *rep = ep;
+		return(0);
+	    }
+	/*
+	 * Process an exempt file.
+	 */
+	    ds = 0;
+	    if ((mp = ep->mp)) {
+		if (mp->ds & SB_DEV) {
+		    Lf->dev = mp->dev;
+		    ds = Lf->dev_def = 1;
+		}
+		if (mp->ds & SB_RDEV) {
+		    Lf->rdev = mp->rdev;
+		    ds = Lf->rdev_def = 1;
+		}
+	    }
+	    if (!ds)
+		(void) enter_dev_ch("UNKNOWN");
+	    Lf->ntype = N_UNKN;
+	    (void) snpf(Lf->type, sizeof(Lf->type), "%s",
+			(type ? type : "UNKN"));
+	    (void) enter_nm(path);
+	    (void) snpf(nmabuf, sizeof(nmabuf), "(%ce %s)",
+		ep->rdlnk ? '+' : '-', ep->path);
+	    nmabuf[sizeof(nmabuf) - 1] = '\0';
+	    (void) add_nma(nmabuf, strlen(nmabuf));
+	    if (Lf->sf) {
+		if (lfr)
+		    *lfr = Lf;
+		link_lfile();
+	    } else if (lfr)
+		*lfr = (struct lfile *)NULL;
+	    return(0);
+	}
+	return(1);
 }
 
 
@@ -701,7 +779,7 @@ process_id(idp, idpl, cmd, uid, pid, ppid, pgid, tid)
 	int av;
 	static char *dpath = (char *)NULL;
 	static int dpathl = 0;
-	short enls, enss, lnk, oty, pn, pss, sf, tsf;
+	short efs, enls, enss, lnk, oty, pn, pss, sf;
 	int fd, i, ls, n, ss, sv;
 	struct l_fdinfo fi;
 	DIR *fdp;
@@ -709,6 +787,7 @@ process_id(idp, idpl, cmd, uid, pid, ppid, pgid, tid)
 	static char *ipath = (char *)NULL;
 	static int ipathl = 0;
 	int j = 0;
+	struct lfile *lfr;
 	struct stat lsb, sb;
 	char nmabuf[MAXPATHLEN + 1], pbuf[MAXPATHLEN + 1];
 	static char *path = (char *)NULL;
@@ -745,6 +824,7 @@ process_id(idp, idpl, cmd, uid, pid, ppid, pgid, tid)
 	if (!Ckscko) {
 	    (void) make_proc_path(idp, idpl, &path, &pathl, "cwd");
 	    alloc_lfile(CWD, -1);
+	    efs = 0;
 	    if (getlinksrc(path, pbuf, sizeof(pbuf)) < 1) {
 		if (!Fwarn) {
 		    (void) memset((void *)&sb, 0, sizeof(sb));
@@ -758,19 +838,24 @@ process_id(idp, idpl, cmd, uid, pid, ppid, pgid, tid)
 		    pn = 0;
 	    } else {
 		lnk = pn = 1;
-		ss = SB_ALL;
-		if (HasNFS) {
-		    if ((sv = statsafely(path, &sb)))
+		if (Efsysl && !isefsys(pbuf, "UNKNcwd", 1, NULL, &lfr)) {
+		    efs = 1;
+		    pn = 0;
+		} else {
+		    ss = SB_ALL;
+		    if (HasNFS) {
+			if ((sv = statsafely(path, &sb)))
 			sv = statEx(pbuf, &sb, &ss);
-		} else
-		    sv = stat(path, &sb);
-		if (sv) {
-		    ss = 0;
-		    if (!Fwarn) {
-			(void) snpf(nmabuf, sizeof(nmabuf), "(stat: %s)",
-			    strerror(errno));
-			nmabuf[sizeof(nmabuf) - 1] = '\0';
-			(void) add_nma(nmabuf, strlen(nmabuf));
+		    } else
+			sv = stat(path, &sb);
+		    if (sv) {
+			ss = 0;
+			if (!Fwarn) {
+			    (void) snpf(nmabuf, sizeof(nmabuf), "(stat: %s)",
+				strerror(errno));
+			    nmabuf[sizeof(nmabuf) - 1] = '\0';
+			    (void) add_nma(nmabuf, strlen(nmabuf));
+			}
 		    }
 		}
 	    }
@@ -801,19 +886,23 @@ process_id(idp, idpl, cmd, uid, pid, ppid, pgid, tid)
 		    pn = 0;
 	    } else {
 		lnk = pn = 1;
-		ss = SB_ALL;
-		if (HasNFS) {
-		    if ((sv = statsafely(path, &sb)))
-			sv = statEx(pbuf, &sb, &ss);
-		} else
-		    sv = stat(path, &sb);
-		if (sv) {
-		    ss = 0;
-		    if (!Fwarn) {
-			(void) snpf(nmabuf, sizeof(nmabuf), "(stat: %s)",
-			    strerror(errno));
-			nmabuf[sizeof(nmabuf) - 1] = '\0';
-			(void) add_nma(nmabuf, strlen(nmabuf));
+		if (Efsysl && !isefsys(pbuf, "UNKNrtd", 1, NULL, NULL))
+		    pn = 0;
+		else {
+		    ss = SB_ALL;
+		    if (HasNFS) {
+			if ((sv = statsafely(path, &sb)))
+			    sv = statEx(pbuf, &sb, &ss);
+		    } else
+			sv = stat(path, &sb);
+		    if (sv) {
+			ss = 0;
+			if (!Fwarn) {
+			    (void) snpf(nmabuf, sizeof(nmabuf), "(stat: %s)",
+				strerror(errno));
+			    nmabuf[sizeof(nmabuf) - 1] = '\0';
+			    (void) add_nma(nmabuf, strlen(nmabuf));
+			}
 		    }
 		}
 	    }
@@ -829,6 +918,7 @@ process_id(idp, idpl, cmd, uid, pid, ppid, pgid, tid)
  * Process the ID's execution info.
  */
 	if (!Ckscko) {
+	    txts = 0;
 	    (void) make_proc_path(idp, idpl, &path, &pathl, "exe");
 	    alloc_lfile("txt", -1);
 	    if (getlinksrc(path, pbuf, sizeof(pbuf)) < 1) {
@@ -846,25 +936,29 @@ process_id(idp, idpl, cmd, uid, pid, ppid, pgid, tid)
 		    pn = 0;
 	    } else {
 		lnk = pn = 1;
-		ss = SB_ALL;
-		if (HasNFS) {
-		    if ((sv = statsafely(path, &sb))) {
-			sv = statEx(pbuf, &sb,  &ss);
-			if (!sv && (ss & SB_DEV) && (ss & SB_INO))
-			    txts = 1;
-		    }
-		} else
-		    sv = stat(path, &sb);
-		if (sv) {
-		    ss = 0;
-		    if (!Fwarn) {
-			(void) snpf(nmabuf, sizeof(nmabuf), "(stat: %s)",
-			    strerror(errno));
-			nmabuf[sizeof(nmabuf) - 1] = '\0';
-			(void) add_nma(nmabuf, strlen(nmabuf));
-		    }
-		} else
-		    txts = 1;
+		if (Efsysl && !isefsys(pbuf, "UNKNtxt", 1, NULL, NULL))
+		    pn = 0;
+		else {
+		    ss = SB_ALL;
+		    if (HasNFS) {
+			if ((sv = statsafely(path, &sb))) {
+			    sv = statEx(pbuf, &sb,  &ss);
+			    if (!sv && (ss & SB_DEV) && (ss & SB_INO))
+				txts = 1;
+			}
+		    } else
+			sv = stat(path, &sb);
+		    if (sv) {
+			ss = 0;
+			if (!Fwarn) {
+			    (void) snpf(nmabuf, sizeof(nmabuf), "(stat: %s)",
+				strerror(errno));
+			    nmabuf[sizeof(nmabuf) - 1] = '\0';
+			    (void) add_nma(nmabuf, strlen(nmabuf));
+			}
+		    } else
+			txts = 1;
+		}
 	    }
 	    if (pn) {
 		(void) process_proc_node(lnk ? pbuf : path,
@@ -963,69 +1057,89 @@ process_id(idp, idpl, cmd, uid, pid, ppid, pgid, tid)
 		    pn = 0;
 	    } else {
 		lnk = 1;
-		if (HasNFS) {
-		    if (lstatsafely(path, &lsb)) {
-			(void) statEx(pbuf, &lsb, &ls);
-		        enls = errno;
-		    } else {
-			enls = 0;
-			ls = SB_ALL;
-		    }
-		    if (statsafely(path, &sb)) {
-			(void) statEx(pbuf, &sb, &ss);
-			enss = errno;
-		    } else {
-			enss = 0;
-			ss = SB_ALL;
-		    }
+		if (Efsysl && !isefsys(pbuf, "UNKNfd", 1, NULL, &lfr)) {
+		    efs = 1;
+		    pn = 0;
 		} else {
-		    ls = lstat(path, &lsb) ? 0 : SB_ALL;
-		    enls = errno;
-		    ss = stat(path, &sb) ? 0 : SB_ALL;
-		    enss = errno;
-		}
-		if (!ls && !Fwarn) {
-		    (void) snpf(nmabuf, sizeof(nmabuf), "lstat: %s)",
-			strerror(enls));
-		    nmabuf[sizeof(nmabuf) - 1] = '\0';
-		    (void) add_nma(nmabuf, strlen(nmabuf));
-		}
-		if (!ss && !Fwarn) {
-		    (void) snpf(nmabuf, sizeof(nmabuf), "(stat: %s)",
-			strerror(enss));
-		    nmabuf[sizeof(nmabuf) - 1] = '\0';
-		    (void) add_nma(nmabuf, strlen(nmabuf));
-		}
-		if (Ckscko) {
-		    if ((ss & SB_MODE) && ((sb.st_mode & S_IFMT) == S_IFSOCK))
+		    if (HasNFS) {
+			if (lstatsafely(path, &lsb)) {
+			    (void) statEx(pbuf, &lsb, &ls);
+			    enls = errno;
+			} else {
+			    enls = 0;
+			    ls = SB_ALL;
+			}
+			if (statsafely(path, &sb)) {
+			    (void) statEx(pbuf, &sb, &ss);
+			    enss = errno;
+			} else {
+			    enss = 0;
+			    ss = SB_ALL;
+			}
+		    } else {
+			ls = lstat(path, &lsb) ? 0 : SB_ALL;
+			enls = errno;
+			ss = stat(path, &sb) ? 0 : SB_ALL;
+			enss = errno;
+		    }
+		    if (!ls && !Fwarn) {
+			(void) snpf(nmabuf, sizeof(nmabuf), "lstat: %s)",
+			    strerror(enls));
+			nmabuf[sizeof(nmabuf) - 1] = '\0';
+			(void) add_nma(nmabuf, strlen(nmabuf));
+		    }
+		    if (!ss && !Fwarn) {
+			(void) snpf(nmabuf, sizeof(nmabuf), "(stat: %s)",
+			    strerror(enss));
+			nmabuf[sizeof(nmabuf) - 1] = '\0';
+			(void) add_nma(nmabuf, strlen(nmabuf));
+		    }
+		    if (Ckscko) {
+			if ((ss & SB_MODE)
+			&&  ((sb.st_mode & S_IFMT) == S_IFSOCK))
+			{
+			    pn = 1;
+			} else
+			    pn = 0;
+		    } else
 			pn = 1;
-		    else
-			pn = 0;
-		} else
-		    pn = 1;
+		}
 	    }
-	    if (pn) {
+	    if (pn || (efs && lfr && oty)) {
 		if (oty) {
 		    (void) make_proc_path(ipath, j, &pathi, &pathil,
 					  fp->d_name);
 		    if ((av = get_fdinfo(pathi, &fi)) & FDINFO_POS) {
-			ls |= SB_SIZE;
-			lsb.st_size = fi.pos;
+			if (efs) {
+			    if (Foffset) {
+				lfr->off = (SZOFFTYPE)fi.pos;
+				lfr->off_def = 1;
+			    }
+			} else {
+			    ls |= SB_SIZE;
+			    lsb.st_size = fi.pos;
+			}
 		    } else
 			ls &= ~SB_SIZE;
 
 #if	!defined(HASNOFSFLAGS)
 		    if ((av & FDINFO_FLAGS) && (Fsv & FSV_FG)) {
-			Lf->ffg = (long)fi.flags;
-			Lf->fsv |= FSV_FG;
+			if (efs) {
+			    lfr->ffg = (long)fi.flags;
+			    lfr->fsv |= FSV_FG;
+			} else {
+			    Lf->ffg = (long)fi.flags;
+			    Lf->fsv |= FSV_FG;
+			}
 		     }
 # endif	/* !defined(HASNOFSFLAGS) */
 
 		}
-		process_proc_node(lnk ? pbuf : path,
-				  &sb, ss, &lsb, ls);
-		if (Lf->sf)
-		    link_lfile();
+		if (pn) {
+		    process_proc_node(lnk ? pbuf : path, &sb, ss, &lsb, ls);
+		    if (Lf->sf)
+			link_lfile();
+		}
 	    }
 	}
 	(void) closedir(fdp);
@@ -1045,7 +1159,7 @@ process_proc_map(p, s, ss)
 {
 	char buf[MAXPATHLEN + 1], *ep, fmtbuf[32], **fp, nmabuf[MAXPATHLEN + 1];
 	dev_t dev;
-	int ds, en, i, mss, nf, sv;
+	int ds, efs, en, i, mss, nf, sv;
 	int eb = 6;
 	INODETYPE inode;
 	MALLOC_S len;
@@ -1058,6 +1172,7 @@ process_proc_map(p, s, ss)
 	    INODETYPE inode;
 	};
 	static struct saved_map *sm = (struct saved_map *)NULL;
+	efsys_list_t *rep;
 	static int sma = 0;
 	static char *vbuf = (char *)NULL;
 	static size_t vsz = (size_t)0;
@@ -1138,7 +1253,7 @@ process_proc_map(p, s, ss)
 		if (!sm) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d bytes for saved maps, PID %d\n",
-			Pn, len, Lp->pid);
+			Pn, (int)len, Lp->pid);
 		    Exit(1);
 		}
 	    }
@@ -1146,17 +1261,25 @@ process_proc_map(p, s, ss)
 	    sm[ns++].inode = inode;
 	/*
 	 * Allocate space for the mapped file, then get stat(2) information
-	 * for it.
+	 * for it.  Skip the stat(2) operation if this is on an exempt file
+	 * system.
 	 */
 	    alloc_lfile("mem", -1);
-	    if (HasNFS) {
-		sv = statsafely(fp[6], &sb);
-	    } else
-		sv = stat(fp[6], &sb);
-	    if (sv) {
+	    if (Efsysl && !isefsys(fp[6], (char *)NULL, 0, &rep, NULL))
+		efs = sv = 1;
+	    else
+		efs = 0;
+	    if (!efs) {
+		if (HasNFS)
+		    sv = statsafely(fp[6], &sb);
+		else
+		    sv = stat(fp[6], &sb);
+	    }
+	    if (sv || efs) {
 		en = errno;
 	    /*
-	     * Applying stat(2) to the file failed, so manufacture a partial
+	     * Applying stat(2) to the file was not possible (file is on an
+	     * exempt file system) or stat(2) failed, so manufacture a partial
 	     * stat(2) reply from the process' maps file entry.
 	     *
 	     * If the file has been deleted, reset its type to "DEL"; otherwise
@@ -1169,7 +1292,7 @@ process_proc_map(p, s, ss)
 		mss = SB_DEV | SB_INO | SB_MODE;
 		if (ds)
 		    alloc_lfile("DEL", -1);
-		else {
+		else if (!efs && !Fwarn) {
 		    (void) snpf(nmabuf, sizeof(nmabuf), "(stat: %s)",
 			strerror(en));
 		    nmabuf[sizeof(nmabuf) - 1] = '\0';
@@ -1221,7 +1344,26 @@ process_proc_map(p, s, ss)
 	/*
 	 * Record the file's information.
 	 */
-	    process_proc_node(fp[6], &sb, mss, (struct stat *)NULL, 0);
+	    if (!efs)
+		process_proc_node(fp[6], &sb, mss, (struct stat *)NULL, 0);
+	    else {
+
+	    /*
+	     * If this file is on an exempt file system, complete the lfile
+	     * structure, but change its type and add the exemption note to
+	     * the NAME column.
+	     */
+		Lf->dev = sb.st_dev;
+		Lf->inode = (ino_t)sb.st_ino;
+		Lf->dev_def = Lf->inp_ty = 1;
+		(void) enter_nm(fp[6]);
+		(void) snpf(Lf->type, sizeof(Lf->type), "%s",
+			    (ds ? "UNKNdel" : "UNKNmem"));
+		(void) snpf(nmabuf, sizeof(nmabuf), "(%ce %s)",
+		    rep->rdlnk ? '+' : '-', rep->path);
+		nmabuf[sizeof(nmabuf) - 1] = '\0';
+		(void) add_nma(nmabuf, strlen(nmabuf));
+	    }
 	    if (Lf->sf)
 		link_lfile();
 	}
@@ -1301,7 +1443,7 @@ read_id_stat(ty, p, id, cmd, ppid, pgid)
 	     if (!cbf) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d bytes for command \"%s\"\n",
-		    Pn, cbfa, cp);
+		    Pn, (int)cbfa, cp);
 		Exit(1);
 	     }
 	}
@@ -1376,7 +1518,7 @@ statEx(p, s, ss)
 	}
 	(void) strcpy(cb, p);
 /*
- * Trim trailing leaves from the end of the path one at a time and do s safe
+ * Trim trailing leaves from the end of the path one at a time and do a safe
  * stat() on each trimmed result.  Stop when a safe stat() succeeds or doesn't
  * fail because of EACCES or EPERM.
  */

@@ -32,7 +32,7 @@
 #ifndef lint
 static char copyright[] =
 "@(#) Copyright 1994 Purdue Research Foundation.\nAll rights reserved.\n";
-static char *rcsid = "$Id: dnode.c,v 1.40 2009/03/25 19:23:06 abe Exp $";
+static char *rcsid = "$Id: dnode.c,v 1.41 2011/08/07 22:51:28 abe Exp $";
 #endif
 
 
@@ -780,7 +780,9 @@ process_overlaid_node:
 #if	defined(HAS_ZFS)
 	case VT_ZFS:
 	    if (!v->v_data
-	    ||  (zm = readzfsnode((KA_T)v->v_data, &zi))) {
+	    ||  (zm = readzfsnode((KA_T)v->v_data, &zi,
+				  ((v->v_vflag & VV_ROOT) ? 1 : 0)))
+	    ) {
 		(void) snpf(Namech, Namechl, "%s: %s", zm,
 		    print_kptr((KA_T)v->v_data, (char *)NULL, 0));
 		enter_nm(Namech);

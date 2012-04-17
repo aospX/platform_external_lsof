@@ -34,7 +34,7 @@
 
 
 /*
- * $Id: dlsof.h,v 1.6 2009/03/25 19:21:37 abe Exp $
+ * $Id: dlsof.h,v 1.8 2012/04/10 16:41:04 abe Exp $
  */
 
 
@@ -49,6 +49,7 @@
 #include <unistd.h>
 #include <wctype.h>
 #include <arpa/inet.h>
+#include <sys/attr.h>
 #include <sys/fcntl.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -77,7 +78,7 @@ typedef	uintptr_t	KA_T;
 #define	MALLOC_P	void
 #define	FREE_P		MALLOC_P
 #define	MALLOC_S	size_t
-#define	MAXSYSCMDL	MAXCOMLEN	/* max system command name length */
+#define	MAXSYSCMDL	(MAXCOMLEN - 1)	/* max system command name length */
 #define	MOUNTED		MNT_MNTTAB 
 #define	QSORT_P		void
 #define	READLEN_T	int
@@ -106,6 +107,7 @@ struct mounts {
 	INODETYPE inode;		/* directory st_ino */
 	mode_t mode;			/* directory st_mode */
 	mode_t fs_mode;			/* file system st_mode */
+	int is_nfs;			/* 1 if NFS file system, 0 if not */
         struct mounts *next;    	/* forward link */
 };
 

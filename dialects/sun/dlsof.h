@@ -31,7 +31,7 @@
 
 
 /*
- * $Id: dlsof.h,v 1.46 2010/01/18 19:03:54 abe Exp $
+ * $Id: dlsof.h,v 1.48 2012/04/10 16:40:23 abe Exp $
  */
 
 
@@ -119,6 +119,7 @@
 #define	printf		__kernel_printf
 #define	snprintf	__kernel_snprintf
 #define	sprintf		__kernel_sprintf
+#define	strsignal	__kernel_strsignal
 #define	swab		__kernel_swab
 #define	vprintf		__kernel_vprintf
 #define	vsprintf	__kernel_vsprintf
@@ -134,6 +135,7 @@
 #undef	printf
 #undef	snprintf
 #undef	sprintf
+#undef	strsignal
 #undef	swab
 #undef	vprintf
 #undef	vsprintf
@@ -148,7 +150,17 @@
 #define	rval_t		char
 #define	strsignal	kernel_strsignal
 #include <sys/strsubr.h>
+
+# if	defined(HAS_SOCKET_PROTO_H)
+#define	_KERNEL	1	/* DEBUG */
+# endif	/* HAS_SOCKET_PROTO_H */
+
 #include <sys/socketvar.h>
+
+# if	defined(HAS_SOCKET_PROTO_H)
+#undef	_KERNEL		/* DEBUG */
+# endif	/* HAS_SOCKET_PROTO_H */
+
 #undef	exit
 #undef	rval_t
 #undef	strsignal
@@ -195,6 +207,13 @@
 #include <sys/tiuser.h>
 #include <rpc/auth.h>
 #include <rpc/clnt.h>
+
+# if	solaris>=110000
+#define	_KERNEL
+#include <rpc/rpc.h>
+#undef	_KERNEL
+# endif	/* solaris>=110000 */
+
 #include <rpc/clnt_soc.h>
 #include <rpc/pmap_prot.h>
 #define	_KERNEL
@@ -271,7 +290,11 @@ struct lock_descriptor {
 #include <sys/ddidmareq.h>
 #include <sys/ddi_impldefs.h>
 #include <sys/mkdev.h>
+
+# if	defined(HASCACHEFS)
 #include <sys/fs/cachefs_fs.h>
+# endif	/* defined(HACACHEFS) */
+
 #include <sys/fs/fifonode.h>
 #include <sys/fs/pc_fs.h>
 #include <sys/fs/pc_dir.h>
@@ -284,7 +307,16 @@ struct lock_descriptor {
 
 #include <sys/fs/snode.h>
 #include <sys/fs/tmpnode.h>
+
+# if	solaris>=110000
+#define	_KERNEL
+# endif	/* solaris>=110000 */
+
 #include <nfs/nfs.h>
+
+# if	solaris>=110000
+#undef	_KERNEL
+# endif	/* solaris>=110000 */
 
 # if	solaris>=100000
 #define	_KERNEL

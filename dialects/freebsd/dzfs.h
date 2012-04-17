@@ -31,7 +31,7 @@
 
 
 /*
- * $Id: dzfs.h,v 1.2 2008/05/09 12:53:13 abe Exp $
+ * $Id: dzfs.h,v 1.3 2011/08/07 22:51:28 abe Exp $
  */
 
 
@@ -106,7 +106,7 @@ typedef struct zfs_info {
 } zfs_info_t;
 
 _PROTOTYPE(extern int kread,(KA_T addr, char *buf, READLEN_T len));
-_PROTOTYPE(extern char *readzfsnode,(KA_T va, zfs_info_t *zi));
+_PROTOTYPE(extern char *readzfsnode,(KA_T va, zfs_info_t *zi, int vr));
 
 # endif	/* defined(HAS_ZFS) */
 #endif	/* defined(FREEBSD_DZFS_H) */

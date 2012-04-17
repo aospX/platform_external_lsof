@@ -32,7 +32,7 @@
 #ifndef lint
 static char copyright[] =
 "@(#) Copyright 1997 Purdue Research Foundation.\nAll rights reserved.\n";
-static char *rcsid = "$Id: dsock.c,v 1.34 2009/03/25 19:22:39 abe Exp $";
+static char *rcsid = "$Id: dsock.c,v 1.38 2012/04/10 16:39:50 abe Exp $";
 #endif
 
 
@@ -74,6 +74,12 @@ struct ipxsin {				/* IPX socket information */
 	struct ipxsin *next;
 };
 
+struct nlksin {				/* Netlink socket information */
+	INODETYPE inode;		/* node number */
+	unsigned int pr;		/* protocol */
+	struct nlksin *next;
+};
+
 struct packin {				/* packet information */
 	INODETYPE inode;
 	int ty;				/* socket type */
@@ -90,6 +96,20 @@ struct rawsin {				/* raw socket information */
 	MALLOC_S ral;			/* strlen(ra) */
 	MALLOC_S spl;			/* strlen(sp) */
 	struct rawsin *next;
+};
+
+struct sctpsin {			/* SCTP socket information */
+	INODETYPE inode;
+	int type;			/* type: 0 = assoc
+					 *	 1 = eps
+					 *	 2  assoc and eps */
+	char *addr;			/* association or endpoint address */
+	char *assocID;			/* association ID */
+	char *lport;			/* local port */
+	char *rport;			/* remote port */
+	char *laddrs;			/* locaal address */
+	char *raddrs;			/* remote address */
+	struct sctpsin *next;
 };
 
 struct tcp_udp {			/* IPv4 TCP and UDP socket
@@ -117,13 +137,13 @@ struct tcp_udp6 {			/* IPv6 TCP and UDP socket
 #endif	/* defined(HASIPv6) */
 
 struct uxsin {				/* UNIX socket information */
-	INODETYPE inode;
-	char *pcb;
-	char *path;
-	unsigned char sb_def;
-	dev_t sb_dev;
-	INODETYPE sb_ino;
-	dev_t sb_rdev;
+	INODETYPE inode;		/* node number */
+	char *pcb;			/* protocol control block */
+	char *path;			/* file path */
+	unsigned char sb_def;		/* stat(2) buffer definitions */
+	dev_t sb_dev;			/* stat(2) buffer device */
+	INODETYPE sb_ino;		/* stat(2) buffer node number */
+	dev_t sb_rdev;			/* stat(2) raw device number */
 	struct uxsin *next;
 };
 
@@ -146,254 +166,28 @@ static char *ax25st[] = {
 static char *Ipxpath = (char *)NULL;	/* path to IPX /proc information */
 static struct ipxsin **Ipxsin = (struct ipxsin **)NULL;
 					/* IPX socket info, hashed by inode */
+static char *Nlkpath = (char *)NULL;	/* path to Netlink /proc information */
+static struct nlksin **Nlksin = (struct nlksin **)NULL;
+					/* Netlink socket info, hashed by
+					 * inode */
 static struct packin **Packin = (struct packin **)NULL;
 					/* packet info, hashed by inode */
-static char *Packpath = (char *)NULL;	/* path to packer /proc information */
-struct packpr {				/* packet protocol conversions */
-	int pr;				/* protocol number */
-	char *nm;			/* protocol name */
-} static Packpr[] = {
-
-#if	defined(ETH_P_LOOP)
-	{ ETH_P_LOOP,		"LOOP" },
-#endif	/* defined(ETH_P_LOOP) */
-
-#if	defined(ETH_P_PUP)
-	{ ETH_P_PUP,		"PUP" },
-#endif	/* defined(ETH_P_PUP) */
-
-#if	defined(ETH_P_PUPAT)
-	{ ETH_P_PUPAT,		"PUPAT" },
-#endif	/* defined(ETH_P_PUPAT) */
-
-#if	defined(ETH_P_IP)
-	{ ETH_P_IP,		"IP" },
-#endif	/* defined(ETH_P_IP) */
-
-#if	defined(ETH_P_X25)
-	{ ETH_P_X25,		"X25" },
-#endif	/* defined(ETH_P_X25) */
-
-#if	defined(ETH_P_ARP)
-	{ ETH_P_ARP,		"ARP" },
-#endif	/* defined(ETH_P_ARP) */
-
-#if	defined(ETH_P_BPQ)
-	{ ETH_P_BPQ,		"BPQ" },
-#endif	/* defined(ETH_P_BPQ) */
-
-#if	defined(ETH_P_IEEEPUP)
-	{ ETH_P_IEEEPUP,	"I3EPUP" },
-#endif	/* defined(ETH_P_IEEEPUP) */
-
-#if	defined(ETH_P_IEEEPUPAT)
-	{ ETH_P_IEEEPUPAT,	"I3EPUPA" },
-#endif	/* defined(ETH_P_IEEEPUPAT) */
-
-#if	defined(ETH_P_DEC)
-	{ ETH_P_DEC,		"DEC" },
-#endif	/* defined(ETH_P_DEC) */
-
-#if	defined(ETH_P_DNA_DL)
-	{ ETH_P_DNA_DL,		"DNA_DL" },
-#endif	/* defined(ETH_P_DNA_DL) */
-
-#if	defined(ETH_P_DNA_RC)
-	{ ETH_P_DNA_RC,		"DNA_RC" },
-#endif	/* defined(ETH_P_DNA_RC) */
-
-#if	defined(ETH_P_DNA_RT)
-	{ ETH_P_DNA_RT,		"DNA_RT" },
-#endif	/* defined(ETH_P_DNA_RT) */
-
-#if	defined(ETH_P_LAT)
-	{ ETH_P_LAT,		"LAT" },
-#endif	/* defined(ETH_P_LAT) */
-
-#if	defined(ETH_P_DIAG)
-	{ ETH_P_DIAG,		"DIAG" },
-#endif	/* defined(ETH_P_DIAG) */
-
-#if	defined(ETH_P_CUST)
-	{ ETH_P_CUST,		"CUST" },
-#endif	/* defined(ETH_P_CUST) */
-
-#if	defined(ETH_P_SCA)
-	{ ETH_P_SCA,		"SCA" },
-#endif	/* defined(ETH_P_SCA) */
-
-#if	defined(ETH_P_RARP)
-	{ ETH_P_RARP,		"RARP" },
-#endif	/* defined(ETH_P_RARP) */
-
-#if	defined(ETH_P_ATALK)
-	{ ETH_P_ATALK,		"ATALK" },
-#endif	/* defined(ETH_P_ATALK) */
-
-#if	defined(ETH_P_AARP)
-	{ ETH_P_AARP,		"AARP" },
-#endif	/* defined(ETH_P_AARP) */
-
-#if	defined(ETH_P_8021Q)
-	{ ETH_P_8021Q,		"8021Q" },
-#endif	/* defined(ETH_P_8021Q) */
-
-#if	defined(ETH_P_IPX)
-	{ ETH_P_IPX,		"IPX" },
-#endif	/* defined(ETH_P_IPX) */
-
-#if	defined(ETH_P_IPV6)
-	{ ETH_P_IPV6,		"IPV6" },
-#endif	/* defined(ETH_P_IPV6) */
-
-#if	defined(ETH_P_SLOW)
-	{ ETH_P_SLOW,		"SLOW" },
-#endif	/* defined(ETH_P_SLOW) */
-	
-#if	defined(ETH_P_WCCP)
-	{ ETH_P_WCCP,		"WCCP" },
-#endif	/* defined(ETH_P_WCCP) */
-
-#if	defined(ETH_P_PPP_DISC)
-	{ ETH_P_PPP_DISC,	"PPP_DIS" },
-#endif	/* defined(ETH_P_PPP_DISC) */
-
-#if	defined(ETH_P_PPP_SES)
-	{ ETH_P_PPP_SES,	"PPP_SES" },
-#endif	/* defined(ETH_P_PPP_SES) */
-
-#if	defined(ETH_P_MPLS_UC)
-	{ ETH_P_MPLS_UC,	"MPLS_UC" },
-#endif	/* defined(ETH_P_MPLS_UC) */
-
-#if	defined(ETH_P_MPLS_MC)
-	{ ETH_P_MPLS_MC,	"MPLS_MC" },
-#endif	/* defined(ETH_P_MPLS_MC) */
-
-#if	defined(ETH_P_ATMMPOA)
-	{ ETH_P_ATMMPOA,	"ATMMPOA" },
-#endif	/* defined(ETH_P_ATMMPOA) */
-
-#if	defined(ETH_P_MPLS_MC)
-	{ ETH_P_MPLS_MC,	"MPLS_MC" },
-#endif	/* defined(ETH_P_MPLS_MC) */
-
-#if	defined(ETH_P_ATMFATE)
-	{ ETH_P_ATMFATE,	"ATMFATE" },
-#endif	/* defined(ETH_P_ATMFATE) */
-
-#if	defined(ETH_P_AOE)
-	{ ETH_P_AOE,		"AOE" },
-#endif	/* defined(ETH_P_AOE) */
-
-#if	defined(ETH_P_TIPC)
-	{ ETH_P_TIPC,		"TIPC" },
-#endif	/* defined(ETH_P_TIPC) */
-
-#if	defined(ETH_P_802_3)
-	{ ETH_P_802_3,		"802.3" },
-#endif	/* defined(ETH_P_802_3) */
-
-#if	defined(ETH_P_AX25)
-	{ ETH_P_AX25,		"AX25" },
-#endif	/* defined(ETH_P_AX25) */
-
-#if	defined(ETH_P_ALL)
-	{ ETH_P_ALL,		"ALL" },
-#endif	/* defined(ETH_P_ALL) */
-
-#if	defined(ETH_P_802_2)
-	{ ETH_P_802_2,		"802.2" },
-#endif	/* defined(ETH_P_802_2) */
-
-#if	defined(ETH_P_SNAP)
-	{ ETH_P_SNAP,		"SNAP" },
-#endif	/* defined(ETH_P_SNAP) */
-
-#if	defined(ETH_P_DDCMP)
-	{ ETH_P_DDCMP,		"DDCMP" },
-#endif	/* defined(ETH_P_DDCMP) */
-
-#if	defined(ETH_P_WAN_PPP)
-	{ ETH_P_WAN_PPP,	"WAN_PPP" },
-#endif	/* defined(ETH_P_WAN_PPP) */
-
-#if	defined(ETH_P_PPP_MP)
-	{ ETH_P_PPP_MP,		"PPP MP" },
-#endif	/* defined(ETH_P_PPP_MP) */
-
-#if	defined(ETH_P_LOCALTALK)
-	{ ETH_P_LOCALTALK,	"LCLTALK" },
-#endif	/* defined(ETH_P_LOCALTALK) */
-
-#if	defined(ETH_P_PPPTALK)
-	{ ETH_P_PPPTALK,	"PPPTALK" },
-#endif	/* defined(ETH_P_PPPTALK) */
-
-#if	defined(ETH_P_TR_802_2)
-	{ ETH_P_TR_802_2,	"802.2" },
-#endif	/* defined(ETH_P_TR_802_2) */
-
-#if	defined(ETH_P_MOBITEX)
-	{ ETH_P_MOBITEX,	"MOBITEX" },
-#endif	/* defined(ETH_P_MOBITEX) */
-
-#if	defined(ETH_P_CONTROL)
-	{ ETH_P_CONTROL,	"CONTROL" },
-#endif	/* defined(ETH_P_CONTROL) */
-
-#if	defined(ETH_P_IRDA)
-	{ ETH_P_IRDA,		"IRDA" },
-#endif	/* defined(ETH_P_IRDA) */
-
-#if	defined(ETH_P_ECONET)
-	{ ETH_P_ECONET,		"ECONET" },
-#endif	/* defined(ETH_P_ECONET) */
-
-#if	defined(ETH_P_HDLC)
-	{ ETH_P_HDLC,		"HDLC" },
-#endif	/* defined(ETH_P_HDLC) */
-
-#if	defined(ETH_P_ARCNET)
-	{ ETH_P_ARCNET,		"ARCNET" },
-#endif	/* defined(ETH_P_ARCNET) */
-
-};
-#define NPACKPR	(sizeof(Packpr) / sizeof(struct packpr))
-struct packty {				/* packet socket type conversions */
-	int ty;				/* type number */
-	char *nm;			/* type name */
-} static Packty[] = {
-
-#if	defined(SOCK_STREAM)
-	{ SOCK_STREAM,		"STREAM" },
-#endif	/* defined(SOCK_STREAM) */
-
-#if	defined(SOCK_DGRAM)
-	{ SOCK_DGRAM,		"DGRAM" },
-#endif	/* defined(SOCK_DGRAM) */
-
-#if	defined(SOCK_RAW)
-	{ SOCK_RAW,		"RAW" },
-#endif	/* defined(SOCK_RAW) */
-
-#if	defined(SOCK_RDM)
-	{ SOCK_RDM,		"RDM" },
-#endif	/* defined(SOCK_RDM) */
-
-#if	defined(SOCK_SEQPACKET)
-	{ SOCK_SEQPACKET,	"SEQPACKET" },
-#endif	/* defined(SOCK_SEQPACKET) */
-
-#if	defined(SOCK_PACKET)
-	{ SOCK_PACKET,		"PACKET" },
-#endif	/* defined(SOCK_PACKET) */
-};
-#define NPACKTY	(sizeof(Packty) / sizeof(struct packty))
+static char *Packpath = (char *)NULL;	/* path to packet /proc information */
 static char *Rawpath = (char *)NULL;	/* path to raw socket /proc
 					 * information */
 static struct rawsin **Rawsin = (struct rawsin **)NULL;
 					/* raw socket info, hashed by inode */
+static char *SCTPPath[] = {		/* paths to /proc/net STCP info */
+	(char *)NULL,			/* 0 = /proc/net/sctp/assocs */
+	(char *)NULL			/* 1 = /proc/net/sctp/eps */
+};
+#define	NSCTPPATHS sizeof(SCTPPath)/sizeof(char *)
+static char *SCTPSfx[] = {		/* /proc/net suffixes */
+	"sctp/assocs",			/* 0 = /proc/net/sctp/assocs */
+	"sctp/eps"			/* 1 = /proc/net/sctp/eps */
+};
+static struct sctpsin **SCTPsin = (struct sctpsin **)NULL;
+					/* SCTP info, hashed by inode */
 static char *SockStatPath = (char *)NULL;
 					/* path to /proc/net socket status */
 static char *TCPpath = (char *)NULL;	/* path to TCP /proc information */
@@ -420,7 +214,7 @@ static int TcpUdp6_bucks = 0;		/* dynamically sized hash bucket
 					 * count for IPv6 TCP and UDP -- will
 					 * be a power of two */
 static char *UDP6path = (char *)NULL;	/* path to IPv6 UDP /proc information */
-static char *UDP6LITEpath = (char *)NULL;
+static char *UDPLITE6path = (char *)NULL;
 					/* path to IPv6 UDPLITE /proc
 					 * information */
 #endif	/* defined(HASIPv6) */
@@ -439,16 +233,22 @@ static struct uxsin **Uxsin = (struct uxsin **)NULL;
 
 _PROTOTYPE(static struct ax25sin *check_ax25,(INODETYPE i));
 _PROTOTYPE(static struct ipxsin *check_ipx,(INODETYPE i));
+_PROTOTYPE(static struct nlksin *check_netlink,(INODETYPE i));
 _PROTOTYPE(static struct packin *check_pack,(INODETYPE i));
 _PROTOTYPE(static struct rawsin *check_raw,(INODETYPE i));
+_PROTOTYPE(static struct sctpsin *check_sctp,(INODETYPE i));
 _PROTOTYPE(static struct tcp_udp *check_tcpudp,(INODETYPE i, char **p));
 _PROTOTYPE(static struct uxsin *check_unix,(INODETYPE i));
 _PROTOTYPE(static void get_ax25,(char *p));
 _PROTOTYPE(static void get_ipx,(char *p));
+_PROTOTYPE(static void get_netlink,(char *p));
 _PROTOTYPE(static void get_pack,(char *p));
 _PROTOTYPE(static void get_raw,(char *p));
+_PROTOTYPE(static void get_sctp,(void));
+_PROTOTYPE(static char *get_sctpaddrs,(char **fp, int i, int nf, int *x));
 _PROTOTYPE(static void get_tcpudp,(char *p, int pr, int clr));
 _PROTOTYPE(static void get_unix,(char *p));
+_PROTOTYPE(static int isainb,(char *a, char *b));
 _PROTOTYPE(static void print_ax25info,(struct ax25sin *ap));
 _PROTOTYPE(static void print_ipxinfo,(struct ipxsin *ip));
 
@@ -527,6 +327,26 @@ check_ipx(i)
 
 
 /*
+ * check_netlink() - check for Netlink socket file
+ */
+
+static struct nlksin *
+check_netlink(i)
+	INODETYPE i;			/* socket file's inode number */
+{
+	int h;
+	struct nlksin *lp;
+
+	h = INOHASH(i);
+	for (lp = Nlksin[h]; lp; lp = lp->next) {
+	    if (i == lp->inode)
+		return(lp);
+	}
+	return((struct nlksin *)NULL);
+}
+
+
+/*
  * check_pack() - check for packet file
  */
 
@@ -546,7 +366,6 @@ check_pack(i)
 }
 
 
-
 /*
  * check_raw() - check for raw socket file
  */
@@ -564,6 +383,26 @@ check_raw(i)
 		return(rp);
 	}
 	return((struct rawsin *)NULL);
+}
+
+
+/*
+ * check_sctp() - check for SCTP socket file
+ */
+
+static struct sctpsin *
+check_sctp(i)
+	INODETYPE i;			/* socket file's inode number */
+{
+	int h;
+	struct sctpsin *sp;
+
+	h = INOHASH(i);
+	for (sp = SCTPsin[h]; sp; sp = sp->next) {
+	    if (i == sp->inode)
+		return(sp);
+	}
+	return((struct sctpsin *)NULL);
 }
 
 
@@ -720,7 +559,7 @@ get_ax25(p)
 	    if (!AX25sin) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d AX25 hash pointer bytes\n",
-		    Pn, INOBUCKS * sizeof(struct ax25sin *));
+		    Pn, (int)(INOBUCKS * sizeof(struct ax25sin *)));
 		Exit(1);
 	    }
 	}
@@ -734,10 +573,10 @@ get_ax25(p)
 	    if ((nf = get_fields(buf, (char *)NULL, &fp, (int *)NULL, 0)) < 24)
 		continue;
 	/*
-	 * /proc/next/ac25 has no title line, a very poor deficiency in its
+	 * /proc/net/ax25 has no title line, a very poor deficiency in its
 	 * implementation.
 	 *
-	 * The ax25_get_info() function in kern mnodule .../net/ax25/af_ax25.c
+	 * The ax25_get_info() function in kern module .../net/ax25/af_ax25.c
 	 * says the format of the lines in the file is:
 	 *
 	 *     magic dev src_addr dest_addr,digi1,digi2,.. st vs vr va t1 t1 \
@@ -792,7 +631,7 @@ get_ax25(p)
 		if (!(da = (char *)malloc(len + 1))) {
 		    (void) fprintf(stderr,
 		      "%s: can't allocate %d destination AX25 addr bytes: %s\n",
-		      Pn, len + 1, fp[3]);
+		      Pn, (int)(len + 1), fp[3]);
 		    Exit(1);
 		}
 		(void) snpf(da, len + 1, "%s", fp[3]);
@@ -807,7 +646,7 @@ get_ax25(p)
 		if (!(sa = (char *)malloc(len + 1))) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d source AX25 address bytes: %s\n",
-			Pn, len + 1, fp[2]);
+			Pn, (int)(len + 1), fp[2]);
 		    Exit(1);
 		}
 		(void) snpf(sa, len + 1, "%s", fp[2]);
@@ -822,7 +661,7 @@ get_ax25(p)
 		if (!(dev_ch = (char *)malloc(len + 1))) {
 		    (void) fprintf(stderr,
 		      "%s: can't allocate %d destination AX25 dev bytes: %s\n",
-		      Pn, len + 1, fp[1]);
+		      Pn, (int)(len + 1), fp[1]);
 		    Exit(1);
 		}
 		(void) snpf(dev_ch, len + 1, "%s", fp[1]);
@@ -835,7 +674,7 @@ get_ax25(p)
 	    if (!(ap = (struct ax25sin *)malloc(sizeof(struct ax25sin)))) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d byte ax25sin structure\n",
-		    Pn, sizeof(struct ax25sin));
+		    Pn, (int)sizeof(struct ax25sin));
 		Exit(1);
 	    }
 	    ap->da = da;
@@ -893,7 +732,7 @@ get_ipx(p)
 	    if (!Ipxsin) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d IPX hash pointer bytes\n",
-		    Pn, INOBUCKS * sizeof(struct ipxsin *));
+		    Pn, (int)(INOBUCKS * sizeof(struct ipxsin *)));
 		Exit(1);
 	    }
 	}
@@ -969,7 +808,7 @@ get_ipx(p)
 		if (!(la = (char *)malloc(len + 1))) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d local IPX address bytes: %s\n",
-			Pn, len + 1, fp[0]);
+			Pn, (int)(len + 1), fp[0]);
 		    Exit(1);
 		}
 		(void) snpf(la, len + 1, "%s", fp[0]);
@@ -984,7 +823,7 @@ get_ipx(p)
 		if (!(ra = (char *)malloc(len + 1))) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d remote IPX address bytes: %s\n",
-			Pn, len + 1, fp[1]);
+			Pn, (int)(len + 1), fp[1]);
 		    Exit(1);
 		}
 		(void) snpf(ra, len + 1, "%s", fp[1]);
@@ -997,7 +836,7 @@ get_ipx(p)
 	    if (!(ip = (struct ipxsin *)malloc(sizeof(struct ipxsin)))) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d byte ipxsin structure\n",
-		    Pn, sizeof(struct ipxsin));
+		    Pn, (int)sizeof(struct ipxsin));
 		Exit(1);
 	    }
 	    ip->inode = inode;
@@ -1012,6 +851,110 @@ get_ipx(p)
 	(void) fclose(xs);
 }
 
+ 
+/*
+ * get_netlink() - get /proc/net/netlink info
+ */
+
+static void
+get_netlink(p)
+	char *p;			/* /proc/net/netlink path */
+{
+	char buf[MAXPATHLEN], *ep, **fp;
+	int fr = 1;
+	int h, pr;
+	INODETYPE inode;
+	struct nlksin *np, *lp;
+	static char *vbuf = (char *)NULL;
+	static size_t vsz = (size_t)0;	
+	FILE *xs;
+/*
+ * Do second time cleanup or first time setup.
+ */
+	if (Nlksin) {
+	    for (h = 0; h < INOBUCKS; h++) {
+		for (lp = Nlksin[h]; lp; lp = np) {
+		    np = lp->next;
+		    (void) free((FREE_P *)lp);
+		}
+		Nlksin[h] = (struct nlksin *)NULL;
+	    }
+	} else {
+	    Nlksin = (struct nlksin **)calloc(INOBUCKS,sizeof(struct nlksin *));
+	    if (!Nlksin) {
+		(void) fprintf(stderr,
+		    "%s: can't allocate %d netlink hash pointer bytes\n",
+		    Pn, (int)(INOBUCKS * sizeof(struct nlksin *)));
+		Exit(1);
+	    }
+	}
+/*
+ * Open the /proc/net/netlink file, assign a page size buffer to its stream,
+ * and read the file.  Store Netlink info in the Nlksin[] hash buckets.
+ */
+	if (!(xs = open_proc_stream(p, "r", &vbuf, &vsz, 0)))
+	    return;
+	while (fgets(buf, sizeof(buf) - 1, xs)) {
+	    if (get_fields(buf, (char *)NULL, &fp, (int *)NULL, 0) < 10)
+		continue;
+	    if (fr) {
+
+	    /*
+	     * Check the column labels in the first line.
+	     */
+		if (!fp[1] || strcmp(fp[1], "Eth")
+		||  !fp[9] || strcmp(fp[9], "Inode"))
+		{
+		    if (!Fwarn) {
+			(void) fprintf(stderr,
+			    "%s: WARNING: unsupported format: %s\n",
+			    Pn, p);
+		    }
+		    break;
+		}
+		fr = 0;
+		continue;
+	    }
+	/*
+	 * Assemble the inode number and see if the inode is already
+	 * recorded.
+	 */
+	    ep = (char *)NULL;
+	    if (!fp[9] || !*fp[9]
+	    ||  (inode = strtoull(fp[9], &ep, 0)) == ULONG_MAX
+	    ||  !ep || *ep)
+		continue;
+	    h = INOHASH(inode);
+	    for (lp = Nlksin[h]; lp; lp = lp->next) {
+		if (inode == lp->inode)
+		    break;
+	    }
+	    if (lp)
+		continue;
+	/*
+	 * Save the protocol from the Eth column.
+	 */
+	    if (!fp[1] || !*fp[1] || (strlen(fp[1])) < 1)
+		continue;
+	    pr = atoi(fp[1]);
+	/*
+	 * Allocate space for a nlksin entry, fill it, and link it to its
+	 * hash bucket.
+	 */
+	    if (!(lp = (struct nlksin *)malloc(sizeof(struct nlksin)))) {
+		(void) fprintf(stderr,
+		    "%s: can't allocate %d byte Netlink structure\n",
+		    Pn, (int)sizeof(struct nlksin));
+		Exit(1);
+	    }
+	    lp->inode = inode;
+	    lp->pr = pr;
+	    lp->next = Nlksin[h];
+	    Nlksin[h] = lp;
+	}
+	(void) fclose(xs);
+}
+
 
 /*
  * get_pack() - get /proc/net/packet info
@@ -1022,7 +965,8 @@ get_pack(p)
 	char *p;			/* /proc/net/raw path */
 {
 	char buf[MAXPATHLEN], *ep, **fp;
-	int h, lc, ty;
+	int fl = 1;
+	int h, ty;
 	INODETYPE inode;
 	struct packin *np, *pp;
 	unsigned long pr;
@@ -1046,7 +990,7 @@ get_pack(p)
 	    if (!Packin) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d packet hash pointer bytes\n",
-		    Pn, INOBUCKS * sizeof(struct packin *));
+		    Pn, (int)(INOBUCKS * sizeof(struct packin *)));
 		Exit(1);
 	    }
 	}
@@ -1056,12 +1000,10 @@ get_pack(p)
  */
 	if (!(xs = open_proc_stream(p, "r", &vbuf, &vsz, 0)))
 	    return;
-	lc = 0;
 	while (fgets(buf, sizeof(buf) - 1, xs)) {
 	    if (get_fields(buf, (char *)NULL, &fp, (int *)NULL, 0) < 9)
 		continue;
-	    lc++;
-	    if (lc == 1) {
+	    if (fl) {
 
 	    /*
 	     * Check the column labels in the first line.
@@ -1077,6 +1019,7 @@ get_pack(p)
 		    }
 		    break;
 		}
+		fl = 0;
 		continue;
 	    }
 	/*
@@ -1112,7 +1055,7 @@ get_pack(p)
 	    if (!(pp = (struct packin *)malloc(sizeof(struct packin)))) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d byte packet structure\n",
-		    Pn, sizeof(struct packin));
+		    Pn, (int)sizeof(struct packin));
 		Exit(1);
 	    }
 	    pp->inode = inode;
@@ -1163,7 +1106,7 @@ get_raw(p)
 	    if (!Rawsin) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d raw hash pointer bytes\n",
-		    Pn, INOBUCKS * sizeof(struct rawsin *));
+		    Pn, (int)(INOBUCKS * sizeof(struct rawsin *)));
 		Exit(1);
 	    }
 	}
@@ -1222,7 +1165,7 @@ get_raw(p)
 		if (!(la = (char *)malloc(lal + 1))) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d local raw address bytes: %s\n",
-			Pn, lal + 1, fp[1]);
+			Pn, (int)(lal + 1), fp[1]);
 		    Exit(1);
 		}
 		(void) snpf(la, lal + 1, "%s", fp[1]);
@@ -1234,7 +1177,7 @@ get_raw(p)
 		if (!(ra = (char *)malloc(ral + 1))) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d remote raw address bytes: %s\n",
-			Pn, ral + 1, fp[2]);
+			Pn, (int)(ral + 1), fp[2]);
 		    Exit(1);
 		}
 		(void) snpf(ra, ral + 1, "%s", fp[2]);
@@ -1246,7 +1189,7 @@ get_raw(p)
 		if (!(sp = (char *)malloc(spl + 1))) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d remote raw state bytes: %s\n",
-			Pn, spl + 1, fp[2]);
+			Pn, (int)(spl + 1), fp[2]);
 		    Exit(1);
 		}
 		(void) snpf(sp, spl + 1, "%s", fp[3]);
@@ -1258,7 +1201,7 @@ get_raw(p)
 	    if (!(rp = (struct rawsin *)malloc(sizeof(struct rawsin)))) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d byte rawsin structure\n",
-		    Pn, sizeof(struct rawsin));
+		    Pn, (int)sizeof(struct rawsin));
 		Exit(1);
 	    }
 	    rp->inode = inode;
@@ -1272,6 +1215,377 @@ get_raw(p)
 	    Rawsin[h] = rp;
 	}
 	(void) fclose(xs);
+}
+
+
+/*
+ * get_sctp() - get /proc/net/sctp/assocs info
+ */
+
+static void
+get_sctp()
+{
+	char buf[MAXPATHLEN], *a, *ep, **fp, *id, *la, *lp, *ra, *rp, *ta;
+	int d, err, fl, h, i, j, nf, ty, x;
+	INODETYPE inode;
+	MALLOC_S len, plen;
+	struct sctpsin *sp, *np;
+	FILE *ss;
+	static char *vbuf = (char *)NULL;
+	static size_t vsz = (size_t)0;
+/*
+ * Do second time cleanup or first time setup.
+ */
+	if (SCTPsin) {
+	    for (h = 0; h < INOBUCKS; h++) {
+		for (sp = SCTPsin[h]; sp; sp = np) {
+		    np = sp->next;
+		    if (sp->addr)
+			(void) free((FREE_P *)sp->addr);
+		    if (sp->assocID)
+			(void) free((FREE_P *)sp->assocID);
+		    if (sp->lport)
+			(void) free((FREE_P *)sp->lport);
+		    if (sp->rport)
+			(void) free((FREE_P *)sp->rport);
+		    if (sp->laddrs)
+			(void) free((FREE_P *)sp->laddrs);
+		    if (sp->raddrs)
+			(void) free((FREE_P *)sp->raddrs);
+		    (void) free((FREE_P *)sp);
+		}
+		SCTPsin[h] = (struct sctpsin *)NULL;
+	    }
+	} else {
+	    SCTPsin = (struct sctpsin **)calloc(INOBUCKS,
+					      sizeof(struct sctpsin *));
+	    if (!SCTPsin) {
+		(void) fprintf(stderr,
+		    "%s: can't allocate %d SCTP hash pointer bytes\n",
+		    Pn, (int)(INOBUCKS * sizeof(struct sctpsin *)));
+		Exit(1);
+	    }
+	}
+/*
+ * Open the /proc/net/sctp files, assign a page size buffer to the streams,
+ * and read them.  Store SCTP socket info in the SCTPsin[] hash buckets.
+ */
+	for (i = 0; i < NSCTPPATHS; i++ ) {
+	    if (!(ss = open_proc_stream(SCTPPath[i], "r", &vbuf, &vsz, 0)))
+		continue;
+	    fl = 1;
+	    while (fgets(buf, sizeof(buf) - 1, ss)) {
+		if ((nf = get_fields(buf, (char *)NULL, &fp, (int *)NULL, 0))
+		<   (i ? 9 : 16)
+		) {
+		    continue;
+		}
+		if (fl) {
+
+		/*
+		 * Check the column labels in the first line.
+		 */
+		    err = 0;
+		    switch (i) {
+		    case 0:
+			if (!fp[0]  || strcmp(fp[0],  "ASSOC")
+			||  !fp[6]  || strcmp(fp[6],  "ASSOC-ID")
+			||  !fp[10] || strcmp(fp[10], "INODE")
+			||  !fp[11] || strcmp(fp[11], "LPORT")
+			||  !fp[12] || strcmp(fp[12], "RPORT")
+			||  !fp[13] || strcmp(fp[13], "LADDRS")
+			||  !fp[14] || strcmp(fp[14], "<->")
+			||  !fp[15] || strcmp(fp[15], "RADDRS")
+			) {
+			    err = 1;
+			}
+			break;
+		    case 1:
+			if (!fp[0]  || strcmp(fp[0],  "ENDPT")
+			||  !fp[5]  || strcmp(fp[5],  "LPORT")
+			||  !fp[7]  || strcmp(fp[7],  "INODE")
+			||  !fp[8]  || strcmp(fp[8],  "LADDRS")
+			) {
+			    err = 1;
+			}
+		    }
+		    if (err) {
+			if (!Fwarn)
+			    (void) fprintf(stderr,
+				"%s: WARNING: unsupported format: %s\n",
+				Pn, SCTPPath[i]);
+			break;
+		    }
+		    fl = 0;
+		    continue;
+		}
+	    /*
+	     * Assemble the inode number and see if it has already been
+	     * recorded.
+	     */
+		ep = (char *)NULL;
+		j = i ? 7 : 10;
+		if (!fp[j] || !*fp[j]
+		||  (inode = strtoull(fp[j], &ep, 0)) == ULONG_MAX
+		||  !ep || *ep)
+		    continue;
+		h = INOHASH((INODETYPE)inode);
+		for (sp = SCTPsin[h]; sp; sp = sp->next) {
+		    if (inode == sp->inode)
+			break;
+		}
+	    /*
+	     * Set the entry type.
+	     */
+		if (sp)
+		    ty = (sp->type == i) ? i : 3;
+		else
+		    ty = i;
+	    /*
+	     * Allocate space for this line's sctpsin members.
+	     *
+	     * The association or endpoint address is in the first field.
+	     */
+		a = sp ? sp->addr : (char *)NULL;
+		if (fp[0] && *fp[0] && (len = strlen(fp[0]))) {
+		    if (a) {
+			if (isainb(fp[0], a)) {
+			    plen = strlen(a);
+			    a = (char *)realloc((MALLOC_P *)a, plen + len + 2);
+			    d = 0;
+			} else
+			    d = 1;
+		    } else {
+			plen = (MALLOC_S)0;
+			a = (char *)malloc(len + 1);
+			d = 0;
+		    }
+		    if (!a) {
+			(void) fprintf(stderr,
+			  "%s: can't allocate %d SCTP ASSOC bytes: %s\n",
+			  Pn, (int)(len + 1), fp[0]);
+			Exit(1);
+		    }
+		    if (!d) {
+			if (plen)
+			    (void) snpf((a + plen), len + 2, ",%s", fp[0]);
+			else
+			    (void) snpf(a, len + 1, "%s", fp[0]);
+		    }
+		}
+	    /*
+	     * The association ID is in the seventh field.
+	     */
+		id = sp ? sp->assocID : (char *)NULL;
+		if (!i && fp[6] && *fp[6] && (len = strlen(fp[6]))) {
+		    if (id) {
+			if (isainb(fp[6], id)) {
+			    plen = strlen(id);
+			    id = (char *)realloc((MALLOC_P *)id,plen+len+2);
+			    d = 0;
+			} else
+			    d = 1;
+		    } else {
+			plen = (MALLOC_S)0;
+			id = (char *)malloc(len + 1);
+			d = 0;
+		    }
+		    if (!id) {
+			(void) fprintf(stderr,
+			  "%s: can't allocate %d SCTP ASSOC-ID bytes: %s\n",
+			  Pn, (int)(len + 1), fp[6]);
+			Exit(1);
+		    }
+		    if (!d) {
+			if (plen)
+			    (void) snpf((id + plen), len + 2, ",%s", fp[6]);
+			else
+			    (void) snpf(id, len + 1, "%s", fp[6]);
+		    }
+		}
+	    /*
+	     * The field number for the local port depends on the entry type.
+	     */
+		j = i ? 5 : 11;
+		lp = sp ? sp->lport : (char *)NULL;
+		if (fp[j] && *fp[j] && (len = strlen(fp[j]))) {
+		    if (lp) {
+			if (isainb(fp[j], lp)) {
+			    plen = strlen(lp);
+			    lp = (char *)realloc((MALLOC_P *)lp,plen+len+2);
+			    d = 0;
+			} else
+			    d = 1;
+		    } else {
+			plen = (MALLOC_S)0;
+			lp = (char *)malloc(len + 1);
+			d = 0;
+		    }
+		    if (!lp) {
+			(void) fprintf(stderr,
+			  "%s: can't allocate %d SCTP LPORT bytes: %s\n",
+			  Pn, (int)(len + 1), fp[j]);
+			Exit(1);
+		    }
+		    if (!d) {
+			if (plen)
+			    (void) snpf((lp + plen), len + 2, ",%s", fp[j]);
+			else
+			    (void) snpf(lp, len + 1, "%s", fp[j]);
+		    }
+		}
+	    /*
+	     * The field number for the remote port depends on the entry type.
+	     */
+		rp = sp ? sp->rport : (char *)NULL;
+		if (!i && fp[12] && *fp[12] && (len = strlen(fp[12]))) {
+		    if (rp) {
+			if (isainb(fp[12], rp)) {
+			    plen = strlen(rp);
+			    rp = (char *)realloc((MALLOC_P *)rp,plen+len+2);
+			    d = 0;
+			} else
+			    d = 1;
+		    } else {
+			plen = (MALLOC_S)0;
+			rp = (char *)malloc(len + 1);
+			d = 0;
+		    }
+		    if (!rp) {
+			(void) fprintf(stderr,
+			  "%s: can't allocate %d SCTP RPORT bytes: %s\n",
+			  Pn, (int)(len + 1), fp[12]);
+			Exit(1);
+		    }
+		    if (!d) {
+			if (plen)
+			    (void) snpf((rp + plen), len + 2, ",%s", fp[12]);
+			else
+			    (void) snpf(rp, len + 1, "%s", fp[12]);
+		    }
+		}
+	    /*
+	     * The local addresses begin in a field whose number depends on
+	     * the entry type.
+	     */
+		j = i ? 8 : 13;
+		la = sp ? sp->laddrs : (char *)NULL;
+		if (fp[j] && *fp[j] && (len = strlen(fp[j]))) {
+		    if (!(ta = get_sctpaddrs(fp, j, nf, &x))) {
+			(void) fprintf(stderr,
+			  "%s: can't allocate %d SCTP LADDRS bytes\n",
+			  Pn, (int)len);
+			Exit(1);
+		    }
+		    if (la) {
+			if (isainb(ta, la)) {
+			    len = strlen(ta);
+			    plen = strlen(la);
+			    if (!(la=(char *)realloc((MALLOC_P *)la,plen+len+2))
+			    ) {
+				(void) fprintf(stderr,
+				  "%s: can't reallocate %d SCTP LADDRS bytes\n",
+				  Pn, (int)len);
+				Exit(1);
+			    }
+			    (void) snpf(la + plen, len + 2, ",%s", ta);
+			    (void) free((FREE_P *)ta);
+			}
+		    } else
+			la = ta;
+		}
+	    /*
+	     * The remote addresses begin after the local addresses, but only
+	     * for the ASSOC type.
+	     */
+		ra = sp ? sp->raddrs : (char *)NULL;
+		if (!i && x && fp[x+1] && *fp[x+1] && (len = strlen(fp[x+1]))) {
+		    if (!(ta = get_sctpaddrs(fp, x + 1, nf, &x))) {
+			(void) fprintf(stderr,
+			  "%s: can't allocate %d SCTP RADDRS bytes\n",
+			  Pn, (int)len);
+			Exit(1);
+		    }
+		    if (ra) {
+			if (isainb(ta, ra)) {
+			    len = strlen(ta);
+			    plen = strlen(ra);
+			    if (!(ra=(char *)realloc((MALLOC_P *)ra,plen+len+2))
+			    ) {
+				(void) fprintf(stderr,
+				  "%s: can't reallocate %d SCTP RADDRS bytes\n",
+				  Pn, (int)len);
+				Exit(1);
+			    }
+			    (void) snpf(ra + plen, len + 2, ",%s", ta);
+			    (void) free((FREE_P *)ta);
+			}
+		    } else
+			ra = ta;
+		}
+	    /*
+	     * If no matching sctpsin entry was found for this inode, allocate
+	     * space for a new sctpsin entry, fill it, and link it to its hash
+	     * bucket.  Update a matching entry.
+	     */
+		if (!sp) {
+		    if (!(sp = (struct sctpsin *)malloc(sizeof(struct sctpsin)))		    ) {
+			(void) fprintf(stderr,
+			    "%s: can't allocate %d byte sctpsin structure\n",
+			    Pn, (int)sizeof(struct sctpsin));
+			Exit(1);
+		    }
+		    sp->inode = inode;
+		    sp->next = SCTPsin[h];
+		    SCTPsin[h] = sp;
+		}
+		sp->addr = a;
+		sp->assocID = id;
+		sp->lport = lp;
+		sp->rport = rp;
+		sp->laddrs = la;
+		sp->raddrs = ra;
+		sp->type = ty;
+	    }
+	    (void) fclose(ss);
+	}
+}
+
+
+static char *
+get_sctpaddrs(fp, i, nf, x)
+	char **fp;			/* field pointers */
+	int i;				/* first address field index in fp */
+	int nf;				/* number of fields */
+	int *x;				/* index of first "<->" field entry */
+{
+	MALLOC_S al = (MALLOC_S)0;
+	char *cp = (char *)NULL;
+	MALLOC_S tl;
+
+	*x = 0;
+	do {
+	    if ((i >= nf) || !fp[i] || !*fp[i] || !(tl = strlen(fp[i])))
+		break;
+	    if (!strcmp(fp[i], "<->")) {
+		*x = i;
+		break;
+	    }
+	    if (!strchr(fp[i], (int)'.') && !strchr(fp[i], (int)':'))
+		break;
+	    if (cp)
+		cp = (char *)realloc((MALLOC_P *)cp, al + tl + 1);
+	    else 
+		cp = (char *)malloc(al + tl + 1);
+	    if (!cp)
+		break;
+	    if (al)
+		*(cp + al - 1) = ',';
+	    (void) strncpy(al ? (cp + al) : cp, fp[i], tl);
+	    al += (tl + 1);
+	    *(cp + al - 1) = '\0';
+	} while (++i < nf);
+	return(cp);
 }
 
 
@@ -1427,7 +1741,7 @@ get_tcpudp(p, pr, clr)
 	    if (!(tp = (struct tcp_udp *)malloc(sizeof(struct tcp_udp)))) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d bytes for tcp_udp struct\n",
-		    Pn, sizeof(struct tcp_udp));
+		    Pn, (int)sizeof(struct tcp_udp));
 		Exit(1);
 	    }
 	    tp->inode = inode;
@@ -1485,7 +1799,7 @@ get_raw6(p)
 	    if (!Rawsin6) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d raw6 hash pointer bytes\n",
-		    Pn, INOBUCKS * sizeof(struct rawsin *));
+		    Pn, (int)(INOBUCKS * sizeof(struct rawsin *)));
 		Exit(1);
 	    }
 	}
@@ -1544,7 +1858,7 @@ get_raw6(p)
 		if (!(la = (char *)malloc(lal + 1))) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d local raw6 address bytes: %s\n",
-			Pn, lal + 1, fp[1]);
+			Pn, (int)(lal + 1), fp[1]);
 		    Exit(1);
 		}
 		(void) snpf(la, lal + 1, "%s", fp[1]);
@@ -1556,7 +1870,7 @@ get_raw6(p)
 		if (!(ra = (char *)malloc(ral + 1))) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d remote raw6 address bytes: %s\n",
-			Pn, ral + 1, fp[2]);
+			Pn, (int)(ral + 1), fp[2]);
 		    Exit(1);
 		}
 		(void) snpf(ra, ral + 1, "%s", fp[2]);
@@ -1568,7 +1882,7 @@ get_raw6(p)
 		if (!(sp = (char *)malloc(spl + 1))) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d remote raw6 state bytes: %s\n",
-			Pn, spl + 1, fp[2]);
+			Pn, (int)(spl + 1), fp[2]);
 		    Exit(1);
 		}
 		(void) snpf(sp, spl + 1, "%s", fp[3]);
@@ -1580,7 +1894,7 @@ get_raw6(p)
 	    if (!(rp = (struct rawsin *)malloc(sizeof(struct rawsin)))) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d byte rawsin structure for IPv6\n",
-		    Pn, sizeof(struct rawsin));
+		    Pn, (int)sizeof(struct rawsin));
 		Exit(1);
 	    }
 	    rp->inode = inode;
@@ -1755,7 +2069,7 @@ get_tcpudp6(p, pr, clr)
 	    if (!(tp6 = (struct tcp_udp6 *)malloc(sizeof(struct tcp_udp6)))) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d bytes for tcp_udp6 struct\n",
-		    Pn, sizeof(struct tcp_udp6));
+		    Pn, (int)sizeof(struct tcp_udp6));
 		Exit(1);
 	    }
 	    tp6->inode = inode;
@@ -1812,7 +2126,7 @@ get_unix(p)
 	    if (!Uxsin) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d bytes for Unix socket info\n",
-		    Pn, INOBUCKS * sizeof(struct uxsin *));
+		    Pn, (int)(INOBUCKS * sizeof(struct uxsin *)));
 	    }
 	}
 /*
@@ -1871,18 +2185,16 @@ get_unix(p)
 		if (!(pcb = (char *)malloc(len + 1))) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d bytes for UNIX PCB: %s\n",
-			Pn, len + 1, fp[0]);
+			Pn, (int)(len + 1), fp[0]);
 		    Exit(1);
 		}
 		(void) snpf(pcb, len + 1, "0x%s", fp[0]);
 	    }
-	    if (nf >= 8
-	    &&  fp[7] && *fp[7] && *fp[7] != '@'
-	    &&  (len = strlen(fp[7]))) {
+	    if (nf >= 8 && fp[7] && *fp[7] && (len = strlen(fp[7]))) {
 		if (!(path = (char *)malloc(len + 1))) {
 		    (void) fprintf(stderr,
 			"%s: can't allocate %d bytes for UNIX path \"%s\"\n",
-			Pn, len + 1, fp[7]);
+			Pn, (int)(len + 1), fp[7]);
 		    Exit(1);
 		}
 		(void) snpf(path, len + 1, "%s", fp[7]);
@@ -1895,7 +2207,7 @@ get_unix(p)
 	    if (!(up = (struct uxsin *)malloc(sizeof(struct uxsin)))) {
 		(void) fprintf(stderr,
 		    "%s: can't allocate %d bytes for uxsin struct\n",
-		    Pn, sizeof(struct uxsin));
+		    Pn, (int)sizeof(struct uxsin));
 		Exit(1);
 	    }
 	    up->inode = inode;
@@ -1963,6 +2275,42 @@ net6a2in6(as, ad)
 
 
 /*
+ * isainb(a,b) is string a in string b
+ */
+
+static int
+isainb(a, b)
+	char *a;			/*string a */
+	char *b;			/* string b */
+{
+	char *cp, *pp;
+	MALLOC_S la, lb, lt;
+
+	if (!a || !b)
+	    return(1);
+	if (!(la = strlen(a)) || !(lb = strlen(b)))
+	    return(1);
+	if (!(cp = strchr(b, (int)','))) {
+	    if (la != lb)
+		return(1);
+	    return(strcmp(a, b));
+	}
+	for (pp = b; pp && *pp; ) {
+	    lt = (MALLOC_S)(cp - pp);
+	    if ((la == lt) && !strncmp(a, pp, lt))
+		return(0);
+	    if (*cp) {
+		pp = cp + 1;
+		if (!(cp = strchr(pp, (int)',')))
+		    cp = b + lb;
+	    } else
+		pp = cp;
+	}
+	return(1);
+}
+
+
+/*
  * print_ax25info() - print AX25 socket info
  */
 
@@ -2007,7 +2355,7 @@ print_ax25info(ap)
 	if (!(cp = (char *)malloc(pl + 1))) {
 	    (void) fprintf(stderr,
 		"%s: can't allocate %d bytes for AX25 sock state, PID: %d\n",
-		Pn, pl + 1, Lp->pid);
+		Pn, (int)(pl + 1), Lp->pid);
 	    Exit(1);
 	}
 	(void) snpf(cp, pl + 1, "%s", pbuf);
@@ -2034,7 +2382,7 @@ print_ipxinfo(ip)
 	if (!(cp = (char *)malloc(pl + 1))) {
 	    (void) fprintf(stderr,
 		"%s: can't allocate %d bytes for IPX sock state, PID: %d\n",
-		Pn, pl + 1, Lp->pid);
+		Pn, (int)(pl + 1), Lp->pid);
 	    Exit(1);
 	}
 	(void) snpf(cp, pl + 1, "%s", pbuf);
@@ -2162,14 +2510,16 @@ process_proc_sock(p, s, ss, l, lss)
 	int lss;			/* *l status -- i.e, SB_* values */
 {
 	struct ax25sin *ap;
-	char *cp, dev_ch[32], *path;
+	char *cp, *path, tbuf[64];
 	unsigned char *fa, *la;
 	struct in_addr fs, ls;
 	struct ipxsin *ip;
 	int i, len, nl;
+	struct nlksin *np;
 	struct packin *pp;
 	char *pr;
 	struct rawsin *rp;
+	struct sctpsin *sp;
 	struct tcp_udp *tp;
 	struct uxsin *up;
 
@@ -2340,6 +2690,150 @@ process_proc_sock(p, s, ss, l, lss)
 		enter_nm(Namech);
 	    return;
 	}
+	if (Nlkpath) {
+	    (void) get_netlink(Nlkpath);
+	    (void) free((FREE_P *) Nlkpath);
+	    Nlkpath = (char *)NULL;
+	}
+	if ((ss & SB_INO)
+	    &&  (np = check_netlink((INODETYPE)s->st_ino))
+	) {
+	    /*
+	     * The inode is connected to a Netlink /proc record.
+	     *
+	     * Set the type to "netlink" and store the protocol in the NAME
+	     * column.  Save the inode number.
+	     */
+
+	    (void) snpf(Lf->type, sizeof(Lf->type), "netlink");
+	    switch (np->pr) {
+
+#if	defined(NETLINK_ROUTE)
+	    case NETLINK_ROUTE:
+		cp = "ROUTE";
+		break;
+#endif	/* defined(NETLINK_ROUTE) */
+
+#if	defined(NETLINK_UNUSED)
+	    case NETLINK_UNUSED:
+		cp = "UNUSED";
+		break;
+#endif	/* defined(NETLINK_UNUSED) */
+
+#if	defined(NETLINK_USERSOCK)
+	    case NETLINK_USERSOCK:
+		cp = "USERSOCK";
+		break;
+#endif	/* defined(NETLINK_USERSOCK) */
+
+#if	defined(NETLINK_FIREWALL)
+	    case NETLINK_FIREWALL:
+		cp = "FIREWALL";
+		break;
+#endif	/* defined(NETLINK_FIREWALL) */
+
+#if	defined(NETLINK_INET_DIAG)
+	    case NETLINK_INET_DIAG:
+		cp = "INET_DIAG";
+		break;
+#endif	/* defined(NETLINK_INET_DIAG) */
+
+#if	defined(NETLINK_NFLOG)
+	    case NETLINK_NFLOG:
+		cp = "NFLOG";
+		break;
+#endif	/* defined(NETLINK_NFLOG) */
+
+#if	defined(NETLINK_XFRM)
+	    case NETLINK_XFRM:
+		cp = "XFRM";
+		break;
+#endif	/* defined(NETLINK_XFRM) */
+
+#if	defined(NETLINK_SELINUX)
+	    case NETLINK_SELINUX:
+		cp = "SELINUX";
+		break;
+#endif	/* defined(NETLINK_SELINUX) */
+
+#if	defined(NETLINK_ISCSI)
+	    case NETLINK_ISCSI:
+		cp = "ISCSI";
+		break;
+#endif	/* defined(NETLINK_ISCSI) */
+
+#if	defined(NETLINK_AUDIT)
+	    case NETLINK_AUDIT:
+		cp = "AUDIT";
+		break;
+#endif	/* defined(NETLINK_AUDIT) */
+
+#if	defined(NETLINK_FIB_LOOKUP)
+	    case NETLINK_FIB_LOOKUP:
+		cp = "FIB_LOOKUP";
+		break;
+#endif	/* defined(NETLINK_FIB_LOOKUP) */
+
+#if	defined(NETLINK_CONNECTOR)
+	    case NETLINK_CONNECTOR:
+		cp = "CONNECTOR";
+		break;
+#endif	/* defined(NETLINK_CONNECTOR) */
+
+#if	defined(NETLINK_NETFILTER)
+	    case NETLINK_NETFILTER:
+		cp = "NETFILTER";
+		break;
+#endif	/* defined(NETLINK_NETFILTER) */
+
+#if	defined(NETLINK_IP6_FW)
+	    case NETLINK_IP6_FW:
+		cp = "IP6_FW";
+		break;
+#endif	/* defined(NETLINK_IP6_FW) */
+
+#if	defined(NETLINK_DNRTMSG)
+	    case NETLINK_DNRTMSG:
+		cp = "DNRTMSG";
+		break;
+#endif	/* defined(NETLINK_DNRTMSG) */
+
+#if	defined(NETLINK_KOBJECT_UEVENT)
+	    case NETLINK_KOBJECT_UEVENT:
+		cp = "KOBJECT_UEVENT";
+		break;
+#endif	/* defined(NETLINK_KOBJECT_UEVENT) */
+
+#if	defined(NETLINK_GENERIC)
+	    case NETLINK_GENERIC:
+		cp = "GENERIC";
+		break;
+#endif	/* defined(NETLINK_GENERIC) */
+
+#if	defined(NETLINK_SCSITRANSPORT)
+	    case NETLINK_SCSITRANSPORT:
+		cp = "SCSITRANSPORT";
+		break;
+#endif	/* defined(NETLINK_SCSITRANSPORT) */
+
+#if	defined(NETLINK_ECRYPTFS)
+	    case NETLINK_ECRYPTFS:
+		cp = "ECRYPTFS";
+		break;
+#endif	/* defined(NETLINK_ECRYPTFS) */
+
+	    default:
+		snpf(Namech, Namechl, "unknown protocol: %d", np->pr);
+		cp = (char *)NULL;
+	    }
+	    if (cp)
+		(void) snpf(Namech, Namechl, "%s", cp);
+	    Lf->inode = (INODETYPE)s->st_ino;
+	    Lf->inp_ty = 1;
+	    if (Namech[0])
+		enter_nm(Namech);
+	    return;
+	}
 	if (Packpath) {
 	    (void) get_pack(Packpath);
 	    (void) free((FREE_P *)Packpath);
@@ -2357,24 +2851,364 @@ process_proc_sock(p, s, ss, l, lss)
 	 * number in the DEVICE column.
 	 */
 	    (void) snpf(Lf->type, sizeof(Lf->type), "pack");
-	    for (i = 0; i < NPACKTY; i++) {
-		if (Packty[i].ty == pp->ty) {
-		    (void) snpf(Namech, Namechl, "type=SOCK_%s",
-			Packty[i].nm);
-		    break;
-		}
+	    switch(pp->ty) {
+
+#if	defined(SOCK_STREAM)
+	    case SOCK_STREAM:
+		cp = "STREAM";
+		break;
+#endif	/* defined(SOCK_STREAM) */
+
+#if	defined(SOCK_DGRAM)
+	    case SOCK_DGRAM:
+		cp = "DGRAM";
+		break;
+#endif	/* defined(SOCK_DGRAM) */
+
+#if	defined(SOCK_RAW)
+	    case SOCK_RAW:
+		cp = "RAW";
+		break;
+#endif	/* defined(SOCK_RAW) */
+
+#if	defined(SOCK_RDM)
+	    case SOCK_RDM:
+		cp = "RDM";
+		break;
+#endif	/* defined(SOCK_RDM) */
+
+#if	defined(SOCK_SEQPACKET)
+	    case SOCK_SEQPACKET:
+		cp = "SEQPACKET";
+		break;
+#endif	/* defined(SOCK_SEQPACKET) */
+
+#if	defined(SOCK_PACKET)
+	    case SOCK_PACKET:
+		cp = "PACKET";
+		break;
+#endif	/* defined(SOCK_PACKET) */
+
+	    default:
+		snpf(Namech, Namechl, "unknown type: %d", pp->ty);
+		cp = (char *)NULL;
 	    }
-	    for (i = 0; i < NPACKPR; i++) {
-		if (Packpr[i].pr == pp->pr)
-		    break;
+	    if (cp)
+		(void) snpf(Namech, Namechl, "type=SOCK_%s", cp);
+	    switch (pp->pr) {
+
+#if	defined(ETH_P_LOOP)
+	    case ETH_P_LOOP:
+		cp = "LOOP";
+		break;
+#endif	/* defined(ETH_P_LOOP) */
+
+#if	defined(ETH_P_PUP)
+	    case ETH_P_PUP:
+		cp = "PUP";
+		break;
+#endif	/* defined(ETH_P_PUP) */
+
+#if	defined(ETH_P_PUPAT)
+	    case ETH_P_PUPAT:
+		cp = "PUPAT";
+		break;
+#endif	/* defined(ETH_P_PUPAT) */
+
+#if	defined(ETH_P_IP)
+	    case ETH_P_IP:
+		cp = "IP";
+		break;
+#endif	/* defined(ETH_P_IP) */
+
+#if	defined(ETH_P_X25)
+	    case ETH_P_X25:
+		cp = "X25";
+		break;
+#endif	/* defined(ETH_P_X25) */
+
+#if	defined(ETH_P_ARP)
+	    case ETH_P_ARP:
+		cp = "ARP";
+		break;
+#endif	/* defined(ETH_P_ARP) */
+
+#if	defined(ETH_P_BPQ)
+	    case ETH_P_BPQ:
+		cp = "BPQ";
+		break;
+#endif	/* defined(ETH_P_BPQ) */
+
+#if	defined(ETH_P_IEEEPUP)
+	    case ETH_P_IEEEPUP:
+		cp = "I3EPUP";
+		break;
+#endif	/* defined(ETH_P_IEEEPUP) */
+
+#if	defined(ETH_P_IEEEPUPAT)
+	    case ETH_P_IEEEPUPAT:
+		cp = "I3EPUPA";
+		break;
+#endif	/* defined(ETH_P_IEEEPUPAT) */
+
+#if	defined(ETH_P_DEC)
+	    case ETH_P_DEC:
+		cp = "DEC";
+		break;
+#endif	/* defined(ETH_P_DEC) */
+
+#if	defined(ETH_P_DNA_DL)
+	    case ETH_P_DNA_DL:
+		cp = "DNA_DL";
+		break;
+#endif	/* defined(ETH_P_DNA_DL) */
+
+#if	defined(ETH_P_DNA_RC)
+	    case ETH_P_DNA_RC:
+		cp = "DNA_RC";
+		break;
+#endif	/* defined(ETH_P_DNA_RC) */
+
+#if	defined(ETH_P_DNA_RT)
+	    case ETH_P_DNA_RT:
+		cp = "DNA_RT";
+		break;
+#endif	/* defined(ETH_P_DNA_RT) */
+
+#if	defined(ETH_P_LAT)
+	    case ETH_P_LAT:
+		cp = "LAT";
+		break;
+#endif	/* defined(ETH_P_LAT) */
+
+#if	defined(ETH_P_DIAG)
+	    case ETH_P_DIAG:
+		cp = "DIAG";
+		break;
+#endif	/* defined(ETH_P_DIAG) */
+
+#if	defined(ETH_P_CUST)
+	    case ETH_P_CUST:
+		cp = "CUST";
+		break;
+#endif	/* defined(ETH_P_CUST) */
+
+#if	defined(ETH_P_SCA)
+	    case ETH_P_SCA:
+		cp = "SCA";
+		break;
+#endif	/* defined(ETH_P_SCA) */
+
+#if	defined(ETH_P_RARP)
+	    case ETH_P_RARP:
+		cp = "RARP";
+		break;
+#endif	/* defined(ETH_P_RARP) */
+
+#if	defined(ETH_P_ATALK)
+	    case ETH_P_ATALK:
+		cp = "ATALK";
+		break;
+#endif	/* defined(ETH_P_ATALK) */
+
+#if	defined(ETH_P_AARP)
+	    case ETH_P_AARP:
+		cp = "AARP";
+		break;
+#endif	/* defined(ETH_P_AARP) */
+
+#if	defined(ETH_P_8021Q)
+	    case ETH_P_8021Q:
+		cp = "8021Q";
+		break;
+#endif	/* defined(ETH_P_8021Q) */
+
+#if	defined(ETH_P_IPX)
+	    case ETH_P_IPX:
+		cp = "IPX";
+		break;
+#endif	/* defined(ETH_P_IPX) */
+
+#if	defined(ETH_P_IPV6)
+	    case ETH_P_IPV6:
+		cp = "IPV6";
+		break;
+#endif	/* defined(ETH_P_IPV6) */
+
+#if	defined(ETH_P_SLOW)
+	    case ETH_P_SLOW:
+		cp = "SLOW";
+		break;
+#endif	/* defined(ETH_P_SLOW) */
+	
+#if	defined(ETH_P_WCCP)
+	    case ETH_P_WCCP:
+		cp = "WCCP";
+		break;
+#endif	/* defined(ETH_P_WCCP) */
+
+#if	defined(ETH_P_PPP_DISC)
+	    case ETH_P_PPP_DISC:
+		cp = "PPP_DIS";
+		break;
+#endif	/* defined(ETH_P_PPP_DISC) */
+
+#if	defined(ETH_P_PPP_SES)
+	    case ETH_P_PPP_SES:
+		cp = "PPP_SES";
+		break;
+#endif	/* defined(ETH_P_PPP_SES) */
+
+#if	defined(ETH_P_MPLS_UC)
+	    case ETH_P_MPLS_UC:
+		cp = "MPLS_UC";
+		break;
+#endif	/* defined(ETH_P_MPLS_UC) */
+
+#if	defined(ETH_P_ATMMPOA)
+	    case ETH_P_ATMMPOA:
+		cp = "ATMMPOA";
+		break;
+#endif	/* defined(ETH_P_ATMMPOA) */
+
+#if	defined(ETH_P_MPLS_MC)
+	    case ETH_P_MPLS_MC:
+		cp = "MPLS_MC";
+		break;
+#endif	/* defined(ETH_P_MPLS_MC) */
+
+#if	defined(ETH_P_ATMFATE)
+	    case ETH_P_ATMFATE:
+		cp = "ATMFATE";
+		break;
+#endif	/* defined(ETH_P_ATMFATE) */
+
+#if	defined(ETH_P_AOE)
+	    case ETH_P_AOE:
+		cp = "AOE";
+		break;
+#endif	/* defined(ETH_P_AOE) */
+
+#if	defined(ETH_P_TIPC)
+	    case ETH_P_TIPC:
+		cp = "TIPC";
+		break;
+#endif	/* defined(ETH_P_TIPC) */
+
+#if	defined(ETH_P_802_3)
+	    case ETH_P_802_3:
+		cp = "802.3";
+		break;
+#endif	/* defined(ETH_P_802_3) */
+
+#if	defined(ETH_P_AX25)
+	    case ETH_P_AX25:
+		cp = "AX25";
+		break;
+#endif	/* defined(ETH_P_AX25) */
+
+#if	defined(ETH_P_ALL)
+	    case ETH_P_ALL:
+		cp = "ALL";
+		break;
+#endif	/* defined(ETH_P_ALL) */
+
+#if	defined(ETH_P_802_2)
+	    case ETH_P_802_2:
+		cp = "802.2";
+		break;
+#endif	/* defined(ETH_P_802_2) */
+
+#if	defined(ETH_P_SNAP)
+	    case ETH_P_SNAP:
+		cp = "SNAP";
+		break;
+#endif	/* defined(ETH_P_SNAP) */
+
+#if	defined(ETH_P_DDCMP)
+	    case ETH_P_DDCMP:
+		cp = "DDCMP";
+		break;
+#endif	/* defined(ETH_P_DDCMP) */
+
+#if	defined(ETH_P_WAN_PPP)
+	    case ETH_P_WAN_PPP:
+		cp = "WAN_PPP";
+		break;
+#endif	/* defined(ETH_P_WAN_PPP) */
+
+#if	defined(ETH_P_PPP_MP)
+	    case ETH_P_PPP_MP:
+		cp = "PPP MP";
+		break;
+#endif	/* defined(ETH_P_PPP_MP) */
+
+#if	defined(ETH_P_LOCALTALK)
+	    case ETH_P_LOCALTALK:
+		cp = "LCLTALK";
+		break;
+#endif	/* defined(ETH_P_LOCALTALK) */
+
+#if	defined(ETH_P_PPPTALK)
+	    case ETH_P_PPPTALK:
+		cp = "PPPTALK";
+		break;
+#endif	/* defined(ETH_P_PPPTALK) */
+
+#if	defined(ETH_P_TR_802_2)
+	    case ETH_P_TR_802_2:
+		cp = "802.2";
+		break;
+#endif	/* defined(ETH_P_TR_802_2) */
+
+#if	defined(ETH_P_MOBITEX)
+	    case ETH_P_MOBITEX:
+		cp = "MOBITEX";
+		break;
+#endif	/* defined(ETH_P_MOBITEX) */
+
+#if	defined(ETH_P_CONTROL)
+	    case ETH_P_CONTROL:
+		cp = "CONTROL";
+		break;
+#endif	/* defined(ETH_P_CONTROL) */
+
+#if	defined(ETH_P_IRDA)
+	    case ETH_P_IRDA:
+		cp = "IRDA";
+		break;
+#endif	/* defined(ETH_P_IRDA) */
+
+#if	defined(ETH_P_ECONET)
+	    case ETH_P_ECONET:
+		cp = "ECONET";
+		break;
+#endif	/* defined(ETH_P_ECONET) */
+
+#if	defined(ETH_P_HDLC)
+	    case ETH_P_HDLC:
+		cp = "HDLC";
+		break;
+#endif	/* defined(ETH_P_HDLC) */
+
+#if	defined(ETH_P_ARCNET)
+	    case ETH_P_ARCNET:
+		cp = "ARCNET";
+		break;
+#endif	/* defined(ETH_P_ARCNET) */
+
+	    default:
+		snpf(tbuf, sizeof(tbuf) - 1, "%d", pp->pr);
+		tbuf[sizeof(tbuf) - 1] = '\0';
+		cp = tbuf;
 	    }
-	    cp = (i < NPACKPR) ? Packpr[i].nm : "unknown";
 	    (void) snpf(Lf->iproto, sizeof(Lf->iproto), "%.*s", IPROTOL-1, cp);
 	    Lf->inp_ty = 2;
 	    if (ss & SB_INO) {
-		(void) snpf(dev_ch, sizeof(dev_ch), InodeFmt_d,
+		(void) snpf(tbuf, sizeof(tbuf), InodeFmt_d,
 		    (INODETYPE)s->st_ino);
-		enter_dev_ch(dev_ch);
+		tbuf[sizeof(tbuf) - 1] = '\0';
+		enter_dev_ch(tbuf);
 	    }
 	    if (Namech[0])
 		enter_nm(Namech);
@@ -2443,7 +3277,7 @@ process_proc_sock(p, s, ss, l, lss)
 		    Lf->dev = up->sb_dev;
 		    Lf->inode = up->sb_ino;
 		    Lf->rdev = up->sb_rdev;
-		    if (is_file_named((char *)NULL, 0)) {
+		    if (is_file_named(0, path, (struct mounts *)NULL, 0)) {
 			f = 1;
 			Lf->sf |= SELNM;
 		    }
@@ -2460,7 +3294,7 @@ process_proc_sock(p, s, ss, l, lss)
 		 * If the file has not yet been found and the stat buffer has
 		 * st_mode, search for the file by full path.
 		 */
-		    if (is_file_named(path,
+		    if (is_file_named(2, path, (struct mounts *)NULL,
 			((s->st_mode & S_IFMT) == S_IFCHR)) ? 1 : 0)
 		    {
 			Lf->sf |= SELNM;
@@ -2548,11 +3382,11 @@ process_proc_sock(p, s, ss, l, lss)
 	    (void) free((FREE_P *)UDP6path);
 	    UDP6path = (char *)NULL;
 	}
-	if (UDP6LITEpath) {
+	if (UDPLITE6path) {
 	    if (!Fxopt)
-		(void) get_tcpudp6(UDP6LITEpath, 2, 0);
-	    (void) free((FREE_P *)UDP6LITEpath);
-	    UDP6LITEpath = (char *)NULL;
+		(void) get_tcpudp6(UDPLITE6path, 2, 0);
+	    (void) free((FREE_P *)UDPLITE6path);
+	    UDPLITE6path = (char *)NULL;
 	}
 	if (!Fxopt && (ss & SB_INO)
 	&&  (tp6 = check_tcpudp6((INODETYPE)s->st_ino, &pr))
@@ -2598,10 +3432,11 @@ process_proc_sock(p, s, ss, l, lss)
 	    (void) snpf(Lf->type, sizeof(Lf->type), "IPv6");
 	    (void) snpf(Lf->iproto, sizeof(Lf->iproto), "%.*s", IPROTOL-1, pr);
 	    Lf->inp_ty = 2;
-	    if (ss && SB_INO) {
-		(void) snpf(dev_ch, sizeof(dev_ch), InodeFmt_d,
+	    if (ss & SB_INO) {
+		(void) snpf(tbuf, sizeof(tbuf), InodeFmt_d,
 		    (INODETYPE)s->st_ino);
-		enter_dev_ch(dev_ch);
+		tbuf[sizeof(tbuf) - 1] = '\0';
+		enter_dev_ch(tbuf);
 	    }
 	    af = AF_INET6;
 	    if (!IN6_IS_ADDR_UNSPECIFIED(&tp6->faddr) || tp6->fport)
@@ -2703,9 +3538,10 @@ process_proc_sock(p, s, ss, l, lss)
 	    (void) snpf(Lf->iproto, sizeof(Lf->iproto), "%.*s", IPROTOL-1, pr);
 	    Lf->inp_ty = 2;
 	    if (ss & SB_INO) {
-		(void) snpf(dev_ch, sizeof(dev_ch), InodeFmt_d,
+		(void) snpf(tbuf, sizeof(tbuf), InodeFmt_d,
 		    (INODETYPE)s->st_ino);
-		enter_dev_ch(dev_ch);
+		tbuf[sizeof(tbuf) - 1] = '\0';
+		enter_dev_ch(tbuf);
 	    }
 	    if (tp->faddr || tp->fport) {
 		fs.s_addr = tp->faddr;
@@ -2727,6 +3563,72 @@ process_proc_sock(p, s, ss, l, lss)
 	    Lf->lts.rqs = Lf->lts.sqs = 1;
 #endif  /* defined(HASTCPTPIQ) */
 
+	    return;
+	}
+	if (SCTPPath[0]) {
+	    (void) get_sctp();
+	    for (i = 0; i < NSCTPPATHS; i++) {
+		(void) free((FREE_P *)SCTPPath[i]);
+		SCTPPath[i] = (char *)NULL;
+	    }
+	}
+	if ((ss & SB_INO) && (sp = check_sctp((INODETYPE)s->st_ino))
+	) {
+
+	/*
+	 * The inode is connected to an SCTP /proc record.
+	 *
+	 * Set the type to "sock"; enter the inode number in the DEVICE
+	 * column; set the protocol to SCTP; and fill in the NAME column
+	 * with ASSOC, ASSOC-ID, ENDPT, LADDRS, LPORT, RADDRS and RPORT.
+	 */
+	    (void) snpf(Lf->type, sizeof(Lf->type), "sock");
+	    (void) snpf(Lf->iproto, sizeof(Lf->iproto), "%.*s", IPROTOL-1,
+		"SCTP");
+	    Lf->inp_ty = 2;
+	    (void) snpf(tbuf, sizeof(tbuf), InodeFmt_d, (INODETYPE)s->st_ino);
+	    tbuf[sizeof(tbuf) - 1] = '\0';
+	    enter_dev_ch(tbuf);
+	    Namech[0] = '\0';
+	    if  (sp->type == 1) {
+
+	    /*
+	     * This is an ENDPT SCTP file.
+	     */
+		(void) snpf(Namech, Namechl,
+		    "ENDPT: %s%s%s%s%s%s",
+		    sp->addr ? sp->addr : "",
+		    (sp->laddrs || sp->lport) ? " " : "",
+		    sp->laddrs ? sp->laddrs : "",
+		    sp->lport ? "[" : "", 
+		    sp->lport ? sp->lport : "", 
+		    sp->lport ? "]" : ""
+		 ); 
+	    } else {
+
+	    /*
+	     * This is an ASSOC, or ASSOC and ENDPT socket file.
+	     */
+		(void) snpf(Namech, Namechl,
+		    "%s: %s%s%s %s%s%s%s%s%s%s%s%s",
+		    sp->type ? "ASSOC+ENDPT" : "ASSOC",
+		    sp->addr ? sp->addr : "",
+		    (sp->addr && sp->assocID) ? "," : "",
+		    sp->assocID ? sp->assocID : "",
+		    sp->laddrs ? sp->laddrs : "",
+		    sp->lport ? "[" : "", 
+		    sp->lport ? sp->lport : "", 
+		    sp->lport ? "]" : "", 
+		    ((sp->laddrs || sp->lport) && (sp->raddrs || sp->rport))
+			? "<->" : "",
+		    sp->raddrs ? sp->raddrs : "",
+		    sp->rport ? "[" : "", 
+		    sp->rport ? sp->rport : "", 
+		    sp->rport ? "]" : ""
+		 ); 
+	    }
+	    if (Namech[0])
+		enter_nm(Namech);
 	    return;
 	}
 /*
@@ -2755,6 +3657,7 @@ set_net_paths(p, pl)
 	char *p;			/* path to /proc/net/ */
 	int pl;				/* strlen(p) */
 {
+	int i;
 	int pathl;
 
 	pathl = 0;
@@ -2762,9 +3665,15 @@ set_net_paths(p, pl)
 	pathl = 0;
 	(void) make_proc_path(p, pl, &Ipxpath, &pathl, "ipx");
 	pathl = 0;
+	(void) make_proc_path(p, pl, &Nlkpath, &pathl, "netlink");
+	pathl = 0;
 	(void) make_proc_path(p, pl, &Packpath, &pathl, "packet");
 	pathl = 0;
 	(void) make_proc_path(p, pl, &Rawpath, &pathl, "raw");
+	for (i = 0; i < NSCTPPATHS; i++) {
+	    pathl = 0;
+	    (void) make_proc_path(p, pl, &SCTPPath[i], &pathl, SCTPSfx[i]);
+	}
 	pathl = 0;
 	(void) make_proc_path(p, pl, &SockStatPath, &pathl, "sockstat");
 	pathl = 0;
@@ -2784,7 +3693,7 @@ set_net_paths(p, pl)
 	pathl = 0;
 	(void) make_proc_path(p, pl, &UDP6path, &pathl, "udp6");
 	pathl = 0;
-	(void) make_proc_path(p, pl, &UDP6LITEpath, &pathl, "udp6lite");
+	(void) make_proc_path(p, pl, &UDPLITE6path, &pathl, "udplite6");
 #endif	/* defined(HASIPv6) */
 
 	pathl = 0;

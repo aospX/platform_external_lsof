@@ -32,7 +32,7 @@
 #ifndef lint
 static char copyright[] =
 "@(#) Copyright 1994 Purdue Research Foundation.\nAll rights reserved.\n";
-static char *rcsid = "$Id: print.c,v 1.51 2010/07/29 15:59:28 abe Exp $";
+static char *rcsid = "$Id: print.c,v 1.54 2012/04/10 16:30:51 abe Exp $";
 #endif
 
 
@@ -68,6 +68,13 @@ struct porttab {
 };
 
 
+#if	defined(HASNORPC_H)
+static struct porttab **Pth[2] = { NULL, NULL };
+						/* port hash buckets:
+						 * Pth[0] for TCP service names
+						 * Pth[1] for UDP service names
+						 */
+#else	/* !defined(HASNORPC_H) */
 static struct porttab **Pth[4] = { NULL, NULL, NULL, NULL };
 						/* port hash buckets:
 						 * Pth[0] for TCP service names
@@ -75,16 +82,18 @@ static struct porttab **Pth[4] = { NULL, NULL, NULL, NULL };
 						 * Pth[2] for TCP portmap info
 						 * Pth[3] for UDP portmap info
 						 */
+#endif /* defined(HASNORPC_H) */
+
 #define HASHPORT(p)	(((((int)(p)) * 31415) >> 3) & (PORTHASHBUCKETS - 1))
 
-# if	!defined(__BIONIC__) // bionic doesn't have RPC support
+# if !defined(HASNORPC_H) || !defined(__BIONIC__) // bionic doesn't have RPC support
 _PROTOTYPE(static void fill_portmap,(void));
-# endif	/* !defined(__BIONIC__) */
+_PROTOTYPE(static void update_portmap,(struct porttab *pt, char *pn));
+# endif	/* !defined(HASNORPC_H) || !defined(__BIONIC__) */
 _PROTOTYPE(static void fill_porttab,(void));
 _PROTOTYPE(static char *lkup_port,(int p, int pr, int src));
 _PROTOTYPE(static char *lkup_svcnam,(int h, int p, int pr, int ss));
 _PROTOTYPE(static int printinaddr,(void));
-_PROTOTYPE(static void update_portmap,(struct porttab *pt, char *pn));
 
 
 /*
@@ -106,6 +115,7 @@ endnm(sz)
 
 # if	!defined(__BIONIC__) // bionic doesn't have RPC support
 
+#if !defined(HASNORPC_H)
 /*
  * fill_portmap() -- fill the RPC portmap program name table via a conversation
  *		     with the portmapper
@@ -269,6 +279,7 @@ fill_portmap()
 	}
 	clnt_destroy(c);
 }
+#endif	/* !defined(HASNORPC_H) */
 
 # endif	/* !defined(__BIONIC__) */
 
@@ -472,7 +483,13 @@ lkup_port(p, pr, src)
  * If the hash buckets haven't been allocated, do so.
  */
 	if (!Pth[0]) {
+
+#if	defined(HASNORPC_H)
+	    nh = 2;
+#else	/* !defined(HASNORPC_H) */
 	    nh = FportMap ? 4 : 2;
+#endif	/* defined(HASNORPC_H) */
+
 	    for (h = 0; h < nh; h++) {
 		if (!(Pth[h] = (struct porttab **)calloc(PORTHASHBUCKETS,
 				sizeof(struct porttab *))))
@@ -487,6 +504,8 @@ lkup_port(p, pr, src)
 		}
 	    }
 	}
+
+#if	!defined(HASNORPC_H)
 /*
  * If we're looking up program names for portmapped ports, make sure the
  * portmap table has been loaded.
@@ -497,13 +516,15 @@ lkup_port(p, pr, src)
 	    (void) fill_portmap();
 	    pm++;
 	}
-# endif	/* !defined(__BIONIC__)
+# endif	/* !defined(__BIONIC__) */
+#endif /* !defined(HASNORPC_H) */
 
 /*
  * Hash the port and see if its name has been cached.  Look for a local
  * port first in the portmap, if portmap searching is enabled.
  */
 	h = HASHPORT(p);
+#if    !defined(HASNORPC_H)
 	if (!src && FportMap) {
 	    for (pt = Pth[pr+2][h]; pt; pt = pt->next) {
 		if (pt->port != p)
@@ -519,6 +540,8 @@ lkup_port(p, pr, src)
 		return(pt->name);
 	    }
 	}
+#endif	/* !defined(HASNORPC_H) */
+
 	for (pt = Pth[pr][h]; pt; pt = pt->next) {
 	    if (pt->port == p)
 		return(pt->name);
@@ -660,7 +683,7 @@ print_file()
 #if	defined(HASTASKS)
 	    if (TaskPrtFl)
 		(void) printf(" %*s", TidColW, TIDTTL);
-#endif	/* defined(HASTASKS)
+#endif	/* defined(HASTASKS) */
 
 #if	defined(HASZONES)
 	    if (Fzone)
@@ -1162,7 +1185,14 @@ addr_too_long:
 	 * Process the port number.
 	 */
 	    if (Lf->li[i].p > 0) {
-		if (Fport || FportMap) {
+
+		if (Fport
+
+#if	!defined(HASNORPC_H)
+		||  FportMap
+#endif	/* defined(HASNORPC_H) */
+
+		) {
 
 		/*
 		 * If converting port numbers to service names, or looking
@@ -1175,9 +1205,10 @@ addr_too_long:
 		 * loopback address 127.0.0.1.  (Test 2 may not always work
 		 * -- e.g., on hosts with multiple interfaces.)
 		 */
+#if	!defined(HASNORPC_H)
 		    if ((src = i) && FportMap) {
 
-#if	defined(HASIPv6)
+# if	defined(HASIPv6)
 			if (Lf->li[0].af == AF_INET6) {
 			    if (IN6_IS_ADDR_LOOPBACK(&Lf->li[i].ia.a6)
 			    ||  IN6_ARE_ADDR_EQUAL(&Lf->li[0].ia.a6,
@@ -1185,7 +1216,7 @@ addr_too_long:
 			    )
 				src = 0;
 			} else
-#endif	/* defined(HASIPv6) */
+# endif	/* defined(HASIPv6) */
 
 			if (Lf->li[0].af == AF_INET) {
 			    if (Lf->li[i].ia.a4.s_addr == htonl(INADDR_LOOPBACK)
@@ -1194,6 +1225,8 @@ addr_too_long:
 				src = 0;
 			}
 		    }
+#endif	/* !defined(HASNORPC_H) */
+
 		    if (strcasecmp(Lf->iproto, "TCP") == 0)
 			port = lkup_port(Lf->li[i].p, 0, src);
 		    else if (strcasecmp(Lf->iproto, "UDP") == 0)
@@ -2171,8 +2204,7 @@ print_nma:
 	)) {
 	    if (ps)
 		putchar(' ');
-	    (void) print_tcptpi(1);
-	    return;
+	    (void) print_tcptpi(0);
 	}
 	if (nl)
 	    putchar('\n');
@@ -2756,6 +2788,7 @@ printunkaf(fam, ty)
 }
 
 
+#if	!defined(HASNORPC_H)
 /*
  * update_portmap() - update a portmap entry with its port number or service
  *		      name
@@ -2788,3 +2821,4 @@ update_portmap(pt, pn)
 	pt->nl = nl;
 	pt->ss = 1;
 }
+#endif	/* !defined(HASNORPC_H) */

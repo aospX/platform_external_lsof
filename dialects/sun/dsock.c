@@ -32,7 +32,7 @@
 #ifndef lint
 static char copyright[] =
 "@(#) Copyright 1994 Purdue Research Foundation.\nAll rights reserved.\n";
-static char *rcsid = "$Id: dsock.c,v 1.30 2010/07/29 16:05:15 abe Exp $";
+static char *rcsid = "$Id: dsock.c,v 1.31 2011/08/07 22:53:42 abe Exp $";
 #endif
 
 
@@ -137,7 +137,13 @@ typedef struct udp { uint_t udp_state;		/* TPI state */
 
 static int	IRU_ctfs = 0;		/* CTF initialization status for
 					 * icmp_t, rts_t and udp_t */
+
+# if	defined(_LP64)
 #define	IRU_MOD_FORMAT "/kernel/%s/genunix"
+#else	/* !defined(_LP64) */
+#define	IRU_MOD_FORMAT "/kernel/genunix"
+#endif	/* defined(_LP64) */
+
 					/* genunix pathname template to which
 					 * the kernel's instruction type set
 					 * is added for CTF access to icmp_t,

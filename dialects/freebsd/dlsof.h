@@ -31,7 +31,7 @@
 
 
 /*
- * $Id: dlsof.h,v 1.43 2010/01/18 19:03:01 abe Exp $
+ * $Id: dlsof.h,v 1.44 2011/09/07 19:14:59 abe Exp $
  */
 
 
@@ -78,11 +78,24 @@
 #define	vm_memattr_t	void
 #  endif	/* defined(HAS_VM_MEMATTR_T) */
 
+#  if	defined(NEEDS_BOOLEAN_T)
+/*
+ * In FreeBSD 9 and above the boolean_t typedef is also needed and is also
+ * under _KERNEL in <sys/types.h>.
+ */
+
+#define	boolean_t	int
+#  endif	/* defined(NEEDS_BOOLEAN_T) */
+
 #include <sys/conf.h>
 
 #  if	defined(HAS_VM_MEMATTR_T)
 #undef	vm_memattr_t
 #  endif	/* defined(HAS_VM_MEMATTR_T) */
+
+#  if	defined(NEEDS_BOOLEAN_T)
+#undef	boolean_t
+#  endif	/* defined(NEEDS_BOOLEAN_T) */
 
 #  if	defined(HAS_CONF_MINOR)
 #undef	minor

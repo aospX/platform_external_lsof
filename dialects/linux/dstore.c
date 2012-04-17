@@ -32,7 +32,7 @@
 #ifndef lint
 static char copyright[] =
 "@(#) Copyright 1997 Purdue Research Foundation.\nAll rights reserved.\n";
-static char *rcsid = "$Id: dstore.c,v 1.3 2008/04/15 13:32:26 abe Exp $";
+static char *rcsid = "$Id: dstore.c,v 1.4 2011/09/07 19:07:45 abe Exp $";
 #endif
 
 
@@ -92,8 +92,15 @@ struct pff_tab Pff_tab[] = {
 #endif	/* defined(O_RSYNC) */
 
 #if	defined(O_LARGEFILE)
+# if	O_LARGEFILE==0
+	{ (long)0100000,	FF_LARGEFILE	},
+# else	/* O_LARGEFILE!=0 */
 	{ (long)O_LARGEFILE,	FF_LARGEFILE	},
+# endif	/* O_LARGEFILE==0 */
+#else	/* !defined(O_LARGEFILE) */
+	{ (long)0100000,	FF_LARGEFILE	},
 #endif	/* defined(O_LARGEFILE) */
+
 	{ (long)0,		NULL		}
 };
 

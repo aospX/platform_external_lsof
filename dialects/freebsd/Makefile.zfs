@@ -1,7 +1,7 @@
 
-# Makefile.zfs -- FreeBSD Makefile remainser for ZFS modules
+# Makefile.zfs -- FreeBSD Makefile remainder for ZFS modules
 #
-# $Id: Makefile.zfs,v 1.2 2008/05/09 12:53:13 abe Exp $
+# $Id: Makefile.zfs,v 1.3 2011/08/07 22:51:28 abe Exp $
 
 CFLAGS+=-D_SOLARIS_C_SOURCE
 CFLAGS+=${DEBUG}

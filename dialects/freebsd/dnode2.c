@@ -35,7 +35,7 @@
 #ifndef lint
 static char copyright[] =
 "@(#) Copyright 2008 Purdue Research Foundation.\nAll rights reserved.\n";
-static char *rcsid = "$Id: dnode2.c,v 1.2 2008/05/09 12:53:13 abe Exp $";
+static char *rcsid = "$Id: dnode2.c,v 1.3 2011/08/07 22:51:28 abe Exp $";
 #endif
 
 
@@ -53,12 +53,19 @@ static char *rcsid = "$Id: dnode2.c,v 1.2 2008/05/09 12:53:13 abe Exp $";
  */
 
 char *
-readzfsnode(za, zi)
+readzfsnode(za, zi, vr)
 	KA_T za;			/* ZFS node address */
 	zfs_info_t *zi;			/* return ZFS info structure pointer */
+	int vr;				/* vnode's (v_flag & VROOT) */
 {
 	struct znode zn;		/* ZFS node */
+
+# if	defined(HAS_Z_PHYS)
 	znode_phys_t zp;		/* ZFS physical node */
+# else	/* !defined(HAS_Z_PHYS) */
+	KA_T ka;			/* temporary kernel address */
+	zfsvfs_t zv;			/* znode's zfsvfs structure */
+# endif	/* defined(HAS_Z_PHYS) */
 
 	memset((void *)zi, 0, sizeof(zfs_info_t));
 	if (!za
@@ -78,8 +85,9 @@ readzfsnode(za, zi)
 	zi->lockf = (KA_T)zn.z_lockf;
 # endif	/* !defined(HAS_V_LOCKF) */
 
+# if	defined(HAS_Z_PHYS)
 /*
- * Read the physical znode for other items.
+ * If the physical znode exists in this ZFS implementation, read it.
  */
 	if (!zn.z_phys
 	||  kread((KA_T)zn.z_phys, (char *)&zp, sizeof(zp))
@@ -89,12 +97,32 @@ readzfsnode(za, zi)
 	    return("Can't read physical znode");
 	}
 /*
- * Return remaining items of znode information.
+ * Return items contained in the physical znode.
  */
-	zi->nl = zp.zp_links;
+	zi->nl = (long)zp.zp_links;
 	zi->rdev = zp.zp_rdev;
 	zi->sz = (SZOFFTYPE)zp.zp_size;
 	zi->nl_def = zi->rdev_def = zi->sz_def = 1;
+# else	/* !defined(HAS_Z_PHYS) */
+/*
+ * If this implementation has no physical znode, return items now contained
+ * in the znode.
+ */
+	zi->nl = (long)zn.z_links;
+	if (vr && (ka = (KA_T)zn.z_zfsvfs)) {
+	    if (!kread(ka, (char *)&zv, sizeof(zv))) {
+		if ((zn.z_id == zv.z_root)
+		&&  (zv.z_ctldir != NULL)
+		&&  (zv.z_show_ctldir)
+		) {
+		    zi->nl++;
+		}
+	    }
+	}
+	zi->sz = (SZOFFTYPE)zn.z_size;
+	zi->nl_def = zi->sz_def = 1;
+# endif	/* defined(HAS_Z_PHYS) */
+
 	return((char *)NULL);
 }
 #endif	/* defined(HAS_ZFS) */

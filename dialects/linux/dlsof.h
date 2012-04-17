@@ -31,7 +31,7 @@
 
 
 /*
- * $Id: dlsof.h,v 1.19 2010/01/18 19:03:12 abe Exp $
+ * $Id: dlsof.h,v 1.22 2012/04/10 16:39:50 abe Exp $
  */
 
 
@@ -56,8 +56,10 @@
 #include <linux/tcp.h>
 # endif	/* defined(GLIBCV) || defined(__UCLIBC__) */
 
+# if	!defined(HASNORPC_H)
 #include <rpc/rpc.h>
 #include <rpc/pmap_prot.h>
+# endif	/* !defined(HASNORPC_H) */
  
 #if	defined(HASSELINUX)
 #include <selinux/selinux.h>
@@ -67,10 +69,11 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <linux/if_ether.h>
+#include <linux/netlink.h>
 
 
 /*
- * This definition is needed for the common function prototype  definitions
+ * This definition is needed for the common function prototype definitions
  * in "proto.h", but isn't used in /proc-based lsof.
  */
 
@@ -136,11 +139,12 @@ typedef	unsigned long	KA_T;
  */
 
 struct mounts {
-        char *dir;              	/* directory (mounted on) */
+        char *dir;              	/* directory name (mounted on) */
 	char *fsname;           	/* file system
 					 * (symbolic links unresolved) */
 	char *fsnmres;           	/* file system
 					 * (symbolic links resolved) */
+	size_t dirl;			/* length of directory name */
         dev_t dev;              	/* directory st_dev */
 	dev_t rdev;			/* directory st_rdev */
 	INODETYPE inode;		/* directory st_ino */
@@ -163,6 +167,9 @@ struct sfile {
 				 	 *	      1 = regular file */
 	INODETYPE i;			/* inode number */
 	int f;				/* file found flag */
+	struct mounts *mp;		/* mount structure pointer for file
+					 * system type entries */
+#define	SAVE_MP_IN_SFILE	1	/* for ck_file_arg() im arg.c */
 	struct sfile *next;		/* forward link */
 };
 
