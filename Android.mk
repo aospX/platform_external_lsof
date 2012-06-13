@@ -31,6 +31,7 @@ LOCAL_C_INCLUDES := \
 	external/busybox/android/regex
 
 LOCAL_CFLAGS := -Os -g -W -Wall \
+	-fno-strict-aliasing \
         -DLINUXV=26032 \
         -D__BIONIC__ \
         -DHASIPv6 \
@@ -55,6 +56,7 @@ LOCAL_C_INCLUDES := \
 	external/busybox/android/regex
 
 LOCAL_CFLAGS := -Os -g -W -Wall \
+	-fno-strict-aliasing \
 	-DLINUXV=26032 \
 	-D__BIONIC__ \
 	-DHASIPv6 \
@@ -84,6 +86,7 @@ LOCAL_C_INCLUDES := \
 	external/busybox/android/regex
 
 LOCAL_CFLAGS := -Os -g -W -Wall \
+	-fno-strict-aliasing \
 	-DLINUXV=26032 \
 	-D__BIONIC__ \
 	-DHASIPv6 \
